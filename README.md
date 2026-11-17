@@ -181,6 +181,8 @@ python -m http.server 17865 --bind 127.0.0.1 --directory desktop/src-tauri/targe
 回滚：默认只允许 `version > 当前版本`，禁止降级。紧急回滚请**发布更高版本号、内容回退到上个 tag 的包**
 （例如 1.0.2 的内容 = 1.0.0）；单点回退可手动运行旧安装包 `/S`。
 
+完整的端到端验收步骤与正式发布 SOP 见 [`docs/updater-runbook.md`](docs/updater-runbook.md)（本次未执行人工验收）。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |
