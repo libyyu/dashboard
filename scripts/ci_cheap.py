@@ -28,9 +28,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend" / "app" / "runtime"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 import log_policy  # noqa: E402
 import ports  # noqa: E402
+import sync_version  # noqa: E402
 from logging_setup import redact_headers, redact_text  # noqa: E402
 from traffic_lanes import Lane, classify_path, overload_action  # noqa: E402
 
@@ -51,11 +53,9 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 
 def main() -> int:
-    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    package = json.loads((ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
-    services_doc = json.loads((ROOT / "desktop" / "services.json").read_text(encoding="utf-8"))
-    check("版本一致性", str(package.get("version")) == version and str(services_doc.get("version")) == version,
-          f"VERSION={version} package={package.get('version')} services={services_doc.get('version')}")
+    services_doc = sync_version.read_services_doc()
+    version_problems = sync_version.version_problems()
+    check("版本一致性（VERSION + 5 处）", not version_problems, "; ".join(version_problems))
 
     check("未知 /api/* 默认 DATA", classify_path("/api/brand-new-slow-thing").lane is Lane.DATA)
     check("health 归 CONTROL", classify_path("/health/ready").lane is Lane.CONTROL)

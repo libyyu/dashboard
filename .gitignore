@@ -17,6 +17,7 @@ __pycache__/
 build/
 dist/
 desktop/src-tauri/binaries/
+packaging/vendor/
 # Rust / Tauri：cargo 产物 + CLI 生成的 IDE schema
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
@@ -44,6 +45,7 @@ profiles/
 *.tmp
 launcher.lock
 launcher.ready.json
+launcher.stop
 runtime_state.json
 desktop-error.txt
 

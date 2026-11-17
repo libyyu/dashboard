@@ -95,12 +95,22 @@ python desktop/launcher.py --dry-run  # 只打印解析结果
 
 ```bash
 cd frontend && npm install && npm run build && cd ..
-python packaging/build.py all --assemble   # 冻结三个 exe 并组装到 src-tauri/binaries/
+python packaging/build.py --sdk-cli <codebuddy-headless.exe 路径> all --assemble
+python packaging/build.py verify           # 校验三个 exe / 冻结清单 / 前端产物 / SDK CLI 齐备
 cd desktop && npm install && npx tauri build
 # 产物：desktop/src-tauri/target/release/bundle/nsis/Plateau_1.0.0_x64-setup.exe
 ```
 
-`build/`、`desktop/src-tauri/binaries/`、`desktop/src-tauri/target/` 均为构建产物，不入库。
+`codebuddy-headless.exe` 是桌面包的必需资源：首次通过 `--sdk-cli`（或 `PLATEAU_SDK_CLI`）提供后
+会缓存到 `packaging/vendor/`，组装时复制到 `binaries/cb/bin/`，随 NSIS 包一起分发；
+launcher 启动时会注入 `CODEBUDDY_CODE_PATH` 指向它。缺少时 `assemble` 直接失败，不产出残缺包。
+
+桌面壳是单实例：重复打开会把已有窗口唤到前台。关闭窗口只隐藏到托盘，服务继续运行；
+托盘菜单提供「显示窗口 / 打开日志目录 / 退出 Plateau」，退出时通过 `launcher.stop`
+触发有序关停（关停 dashboard、cb 并清理 `launcher.lock` / `launcher.ready.json`）。
+
+`build/`、`desktop/src-tauri/binaries/`、`desktop/src-tauri/target/`、`packaging/vendor/`
+均为构建产物，不入库。图标由 `scripts/make_icon.py` 生成，可直接覆盖 `icons/icon.ico` 换成正式素材。
 cb 是外部独立仓库，通过 `PLATEAU_CB_REPO` 指定路径。
 
 ## 接口

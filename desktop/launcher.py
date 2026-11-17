@@ -137,7 +137,10 @@ class LoggingSetupModule(Protocol):
 _children: list[tuple[str, subprocess.Popen[bytes]]] = []
 _lock_file: Path | None = None
 _ready_file: Path | None = None
+_stop_file: Path | None = None
 _logging_setup: LoggingSetupModule | None = None
+_LOG_READY = False
+_PENDING_EVENTS: list[tuple[str, int, dict[str, object]]] = []
 _LOGGER = logging.getLogger("plateau.launcher")
 
 
@@ -167,16 +170,37 @@ _FIELD_ALIASES = {"name": "service_name"}
 
 
 def _event(event: str, level: int = logging.INFO, **fields: object) -> None:
-    """launcher 结构化事件；控制台信息仍由各处的 print 负责。
+    """launcher 结构化事件。
 
     logging 不允许 extra 覆盖 LogRecord 内置字段，这里做别名 + 兜底重命名，
-    避免新增字段时整个 launcher 因 KeyError 崩掉。
+    避免新增字段时整个 launcher 因 KeyError 崩掉。日志装配前的事件先缓存，
+    装配后统一 flush（早期 WARN 不能丢）。
     """
     extra: dict[str, object] = {"event": event}
     for key, value in fields.items():
         safe = _FIELD_ALIASES.get(key, key)
         extra[safe if safe not in _RESERVED_LOG_KEYS else f"field_{safe}"] = value
+    if not _LOG_READY:
+        _PENDING_EVENTS.append((event, level, extra))
+        return
     _LOGGER.log(level, event, extra=extra)
+
+
+def _flush_events() -> None:
+    global _LOG_READY
+    _LOG_READY = True
+    for event, level, extra in _PENDING_EVENTS:
+        _LOGGER.log(level, event, extra=extra)
+    _PENDING_EVENTS.clear()
+
+
+def _console(event: str, message: str, level: int = logging.INFO, **fields: object) -> None:
+    """冻结态 CREATE_NO_WINDOW 下 sys.stdout 可能是 None，print 会静默丢弃。
+
+    关键状态一律同时落结构化日志（launcher-*.log），源码态仍打印方便本地自检。
+    """
+    print(message)
+    _event(event, level, detail=message, **fields)
 
 
 def _expand_str(value: str, ctx: dict[str, object]) -> str:
@@ -268,33 +292,36 @@ def _acquire_lock(path: Path, ready: Path) -> None:
     if old_pid > 0 and old_pid != os.getpid() and _pid_alive(old_pid):
         if _read_json(ready).get("pid") == old_pid:
             raise RuntimeError(f"已有 launcher 在运行 (pid={old_pid})，拒绝重复启动")
-        print(f"[WARN] 接管 stale launcher.lock (pid={old_pid} 仍存在但无 ready 标记)")
+        _console(
+            "launcher.stale_lock_takeover",
+            f"[WARN] 接管 stale launcher.lock (pid={old_pid} 仍存在但无 ready 标记)",
+            logging.WARNING, old_pid=old_pid,
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_json(path, {"pid": os.getpid(), "exe": Path(sys.executable).name})
     _lock_file = path
 
 
 def _shutdown() -> None:
-    # Windows 的 terminate 只杀直接子进程；uvicorn / cb 若再派生子进程会残留，
-    # 占住端口导致下次 resolve_port 回退到别的端口。先按进程树强杀。
-    if os.name == "nt":
-        for _, proc in reversed(_children):
-            if proc.poll() is None:
-                with contextlib.suppress(Exception):
-                    _ = subprocess.run(
-                        ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        creationflags=subprocess.CREATE_NO_WINDOW, timeout=5,
-                    )
+    # 正常路径直接 terminate（毫秒级），让桌面壳的优雅退出不用干等。
+    # 只有 wait 超时才说明子进程派生了孙进程占着管道/端口，此时按进程树强杀。
     for _, proc in reversed(_children):
         if proc.poll() is None:
             with contextlib.suppress(Exception):
                 proc.terminate()
     for name, proc in reversed(_children):
         try:
-            _ = proc.wait(timeout=5)
+            _ = proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            if os.name == "nt":
+                with contextlib.suppress(Exception):
+                    _ = subprocess.run(
+                        ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW, timeout=3,
+                    )
+            with contextlib.suppress(Exception):
+                proc.kill()
         _event("service.exit", name=name, exit_code=proc.poll())
     if _lock_file is not None:
         with contextlib.suppress(Exception):
@@ -302,6 +329,9 @@ def _shutdown() -> None:
     if _ready_file is not None:
         with contextlib.suppress(Exception):
             _ready_file.unlink(missing_ok=True)
+    if _stop_file is not None:
+        with contextlib.suppress(Exception):
+            _stop_file.unlink(missing_ok=True)
     _event("launcher.shutdown", children=len(_children))
     if _logging_setup is not None:
         _logging_setup.shutdown_logging()
@@ -350,7 +380,7 @@ def _on_sigint(_signum: int, _frame: FrameType | None) -> None:
 
 
 def main() -> int:
-    global _logging_setup, _ready_file
+    global _logging_setup, _ready_file, _stop_file
     parser = argparse.ArgumentParser(description="Plateau 桌面包服务编排")
     _ = parser.add_argument("--dry-run", action="store_true", help="只打印解析结果，不启动、不写状态")
     _ = parser.add_argument("--only", default=None, help="只启动指定服务名")
@@ -408,6 +438,12 @@ def main() -> int:
         cli = _assembly_root() / "cb" / "bin" / "codebuddy-headless.exe"
         if cli.is_file():
             shared_env["CODEBUDDY_CODE_PATH"] = str(cli)
+        elif _is_frozen():
+            _console(
+                "sdk_cli.missing",
+                f"[WARN] 冻结包缺少随包 SDK CLI：{cli}（cb 的 CLI 能力不可用）",
+                logging.WARNING, path=str(cli),
+            )
     else:
         _ = shared_env.pop("PLATEAU_CB_HEALTH_URL", None)
         _ = shared_env.pop("CODEBUDDY_CODE_PATH", None)
@@ -431,7 +467,22 @@ def main() -> int:
     _ = signal.signal(signal.SIGINT, _on_sigint)
     profile_dir = home / "profiles" / profile
     ready_path = profile_dir / "launcher.ready.json"
+    stop_path = profile_dir / "launcher.stop"
     _acquire_lock(profile_dir / "launcher.lock", ready_path)
+
+    # 装配日志后 flush 启动前的缓存事件（stale 锁接管 / CLI 缺失等）
+    removed = log_policy.prune_daily_logs(logs_root)
+    logging_setup.configure_logging(
+        "launcher", logs_root, log_policy.daily_log_path,
+        console=False, max_file_bytes=log_policy.max_bytes(),
+    )
+    _logging_setup = logging_setup
+    _flush_events()
+
+    # 上次异常退出可能留下停止标记，先清掉，避免刚启动就立刻退出
+    with contextlib.suppress(Exception):
+        stop_path.unlink(missing_ok=True)
+    _stop_file = stop_path
 
     # 桌面壳只认「本次 run 自己写的 ready」：run_id 由 Tauri 注入，避免读到
     # 上次运行残留的 runtime_state.json 端口而一直停在 loading。
@@ -442,13 +493,6 @@ def main() -> int:
         "ports": dict(port_map),
     })
     _ready_file = ready_path
-
-    removed = log_policy.prune_daily_logs(logs_root)
-    logging_setup.configure_logging(
-        "launcher", logs_root, log_policy.daily_log_path,
-        console=False, max_file_bytes=log_policy.max_bytes(),
-    )
-    _logging_setup = logging_setup
     _event(
         "launcher.start", profile=profile, home=str(home), logs=str(logs_root),
         services=json.dumps(sorted(port_map)), ports=json.dumps(port_map),
@@ -487,8 +531,8 @@ def main() -> int:
             )
         except OSError as error:
             handle.close()
-            print(f"[FAIL] {name} 启动失败: {error}")
-            _event("service.spawn_failed", logging.ERROR, name=name, error=str(error))
+            _console("service.spawn_failed", f"[FAIL] {name} 启动失败: {error}",
+                     logging.ERROR, name=name, error=str(error))
             if svc["required"]:
                 return 1
             continue
@@ -501,11 +545,11 @@ def main() -> int:
             name=f"stdout-{name}", daemon=True,
         ).start()
         started.append((svc, port_map[name], log_path))
-        _event(
-            "service.spawn", name=name, pid=proc.pid, port=port_map[name],
+        _console(
+            "service.spawn", f"[OK] {name} 已拉起 pid={proc.pid} port={port_map[name]} log={log_path}",
+            name=name, pid=proc.pid, port=port_map[name],
             cwd=str(cwd), command=json.dumps(command), stdout_log=str(log_path),
         )
-        print(f"[OK] {name} 已拉起 pid={proc.pid} port={port_map[name]} log={log_path}")
 
     # 第一轮：全部 liveness；第二轮：全部 readiness
     results: dict[str, bool] = {}
@@ -517,25 +561,30 @@ def main() -> int:
             url = f"http://127.0.0.1:{port}{path}"
             ok = _wait(url, seconds)
             results[f"{svc['name']}.{phase}"] = ok
-            _event(
-                "service.health", logging.INFO if ok else logging.WARNING,
+            _console(
+                "service.health", f"[{'OK' if ok else 'FAIL'}] {svc['name']} {phase}: {url}",
+                logging.INFO if ok else logging.WARNING,
                 name=svc["name"], phase=phase, ok=ok, url=url,
             )
-            print(f"[{'OK' if ok else 'FAIL'}] {svc['name']} {phase}: {url}")
             if not ok and svc["required"] and phase == "liveness":
-                print(f"[FAIL] 必需服务 {svc['name']} 未存活")
-                _event("launcher.abort", logging.ERROR, name=svc["name"], phase=phase)
+                _console("launcher.abort", f"[FAIL] 必需服务 {svc['name']} 未存活",
+                         logging.ERROR, name=svc["name"], phase=phase)
                 return 1
 
     if once:
-        _event("launcher.once_done", results=json.dumps(results), ok=all(results.values()))
-        print("[OK] --once 自检结束，准备关停")
+        _console("launcher.once_done", "[OK] --once 自检结束，准备关停",
+                 results=json.dumps(results), ok=all(results.values()))
         return 0 if all(results.values()) else 1
 
-    _event("launcher.resident", pid=os.getpid())
-    print(f"[OK] launcher 常驻中 (pid={os.getpid()})，Ctrl+C 有序关停")
+    _console("launcher.resident",
+             f"[OK] launcher 常驻中 (pid={os.getpid()})，检测 launcher.stop 有序关停",
+             pid=os.getpid(), stop_file=str(stop_path))
     while True:
+        if stop_path.is_file():
+            _console("launcher.stop_requested", "[OK] 收到停止标记，准备有序关停")
+            break
         time.sleep(1)
+    return 0
 
 
 if __name__ == "__main__":

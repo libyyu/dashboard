@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::Manager;
 
@@ -142,8 +142,8 @@ fn report_failure(app: &tauri::AppHandle, msg: &str) {
     let dir = profile_dir();
     let full = match &dir {
         Some(d) => format!(
-            "{msg}\n\n诊断日志：{}",
-            d.join("logs").join("desktop-launcher-stderr.log").display()
+            "{msg}\n\n诊断日志目录：{}\n（desktop-launcher-stderr.log 崩溃栈 / launcher-*.log 结构化事件）",
+            d.join("logs").display()
         ),
         None => msg.to_string(),
     };
@@ -184,13 +184,50 @@ fn wait_and_navigate(app: &tauri::AppHandle, id: &str) {
     report_failure(app, "dashboard 未在 60 秒内就绪。");
 }
 
-/// 退出时杀 launcher 进程树（launcher 会逆序关停 dashboard/cb 并清锁）。
+/// 托盘「打开日志目录」：直接把用户带到本次 profile 的日志目录。
+pub fn open_logs_dir(_app: &tauri::AppHandle) {
+    let Some(logs) = profile_dir().map(|d| d.join("logs")) else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&logs);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("explorer");
+        cmd.arg(&logs);
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let _ = cmd.spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let _ = std::process::Command::new(opener).arg(&logs).spawn();
+    }
+}
+
+/// 优雅退出：先写 launcher.stop 让 launcher 走 atexit（有序关停 dashboard/cb、
+/// 清 lock/ready），等最多 8s；超时才 fallback 到强杀进程树。
 pub fn stop_launcher() {
+    if let Some(dir) = profile_dir() {
+        let _ = std::fs::write(dir.join("launcher.stop"), "1");
+    }
+    let mut exited = false;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        if launcher_exited() {
+            exited = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
     if let Some(mut child) = LAUNCHER.lock().unwrap().take() {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &child.id().to_string()])
-            .output();
-        let _ = child.kill();
+        if !exited {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/T", "/F", "/PID", &child.id().to_string()])
+                .output();
+            let _ = child.kill();
+        }
         let _ = child.wait();
     }
 }

@@ -1,25 +1,39 @@
 # -*- coding: utf-8 -*-
-"""单一版本源 VERSION → 各组件回写 + 包内清单版本同步。
+"""单一版本源 VERSION → 各组件回写 + 全量一致性检查。
 
 用法：
-  python scripts/sync_version.py             # 检查一致性（CI 用），不一致退出 1
-  python scripts/sync_version.py --update   # 回写 package.json 与 desktop/services.json 的 version
+  python scripts/sync_version.py             # 检查六处一致性（CI 用），不一致退出 1
+  python scripts/sync_version.py --update   # 把 VERSION 回写到其余五处
 
 借鉴 EvoFlow 的 evopanel/VERSION + sync-version.js：多服务打一个包时，
-避免「前端 1.0.0 / 后端 0.9.9」这类版本错配。
+避免「前端 1.0.0 / 后端 0.9.9 / 安装包 1.0.1」这类版本错配。
+ci_cheap.py 直接调用 version_problems()，不重复维护一份版本号清单。
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import cast
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = ROOT / "VERSION"
-PACKAGE_JSON = ROOT / "frontend" / "package.json"
-SERVICES_JSON = ROOT / "desktop" / "services.json"
+
+# VERSION 之外的五处派生版本（相对 ROOT）
+_JSON_TARGETS = (
+    "frontend/package.json",
+    "desktop/services.json",
+    "desktop/package.json",
+    "desktop/src-tauri/tauri.conf.json",
+)
+_CARGO_TOML = "desktop/src-tauri/Cargo.toml"
+
+# 只匹配 [package] 段内的第一个 version，避免误伤依赖里的 version = "2"
+_CARGO_PACKAGE_VERSION = re.compile(
+    r'(?ms)^(\[package\][\s\S]*?^version\s*=\s*")([^"]+)(")'
+)
 
 
 def read_version() -> str:
@@ -27,7 +41,54 @@ def read_version() -> str:
 
 
 def read_services_doc() -> dict[str, object]:
-    return cast(dict[str, object], json.loads(SERVICES_JSON.read_text(encoding="utf-8")))
+    return cast(
+        dict[str, object],
+        json.loads((ROOT / "desktop" / "services.json").read_text(encoding="utf-8")),
+    )
+
+
+def _read_json(rel: str) -> dict[str, object]:
+    return cast(dict[str, object], json.loads((ROOT / rel).read_text(encoding="utf-8")))
+
+
+def _read_cargo_version() -> str:
+    match = _CARGO_PACKAGE_VERSION.search((ROOT / _CARGO_TOML).read_text(encoding="utf-8"))
+    return match.group(2) if match else ""
+
+
+def component_versions() -> dict[str, str]:
+    """返回各组件当前版本号（不含 VERSION 本身）。"""
+    versions = {rel: str(_read_json(rel).get("version", "")) for rel in _JSON_TARGETS}
+    versions[_CARGO_TOML] = _read_cargo_version()
+    return versions
+
+
+def version_problems() -> list[str]:
+    """VERSION 与五处派生版本不一致的问题列表；空列表代表一致。"""
+    version = read_version()
+    return [
+        f"{rel} version={found or '<缺失>'} != VERSION {version}"
+        for rel, found in component_versions().items()
+        if found != version
+    ]
+
+
+def _write_json(rel: str, version: str) -> None:
+    path = ROOT / rel
+    data = _read_json(rel)
+    data["version"] = version
+    _ = path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_cargo(version: str) -> None:
+    path = ROOT / _CARGO_TOML
+    text = path.read_text(encoding="utf-8")
+    new_text, count = _CARGO_PACKAGE_VERSION.subn(
+        lambda m: m.group(1) + version + m.group(3), text, count=1
+    )
+    if count != 1:
+        raise RuntimeError(f"{_CARGO_TOML} 未找到 [package] version")
+    _ = path.write_text(new_text, encoding="utf-8")
 
 
 def main() -> int:
@@ -37,41 +98,34 @@ def main() -> int:
     update = cast(bool, args.update)
 
     version = read_version()
-    package = cast(dict[str, object], json.loads(PACKAGE_JSON.read_text(encoding="utf-8")))
     services_doc = read_services_doc()
     raw_services = cast(list[dict[str, object]], services_doc.get("services", []))
     services = [str(s["name"]) for s in raw_services]
 
-    package_version = str(package.get("version", ""))
-    services_version = str(services_doc.get("version", ""))
-
     if update:
-        if package_version != version:
-            package["version"] = version
-            _ = PACKAGE_JSON.write_text(
-                json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
-            print(f"[OK] 回写 {PACKAGE_JSON.relative_to(ROOT)}: {package_version} -> {version}")
-        if services_doc.get("product") != "plateau-dashboard" or services_version != version:
+        if services_doc.get("product") != "plateau-dashboard":
             services_doc["product"] = "plateau-dashboard"
-            services_doc["version"] = version
-            _ = SERVICES_JSON.write_text(
+            _ = (ROOT / "desktop" / "services.json").write_text(
                 json.dumps(services_doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
             )
-            print(f"[OK] 回写 {SERVICES_JSON.relative_to(ROOT)}: version={services_version} -> {version}")
+            print("[OK] 回写 desktop/services.json: product=plateau-dashboard")
+        for rel, found in component_versions().items():
+            if found == version:
+                continue
+            if rel == _CARGO_TOML:
+                _write_cargo(version)
+            else:
+                _write_json(rel, version)
+            print(f"[OK] 回写 {rel}: {found or '<缺失>'} -> {version}")
         return 0
 
-    problems: list[str] = []
-    if package_version != version:
-        problems.append(f"frontend/package.json version={package_version} != VERSION {version}")
-    if services_version != version:
-        problems.append(f"desktop/services.json version={services_version or '<缺失>'} != VERSION {version}")
+    problems = version_problems()
     for problem in problems:
         print(f"[FAIL] {problem}")
     if problems:
         print("[FAIL] 版本不一致，运行 python scripts/sync_version.py --update")
         return 1
-    print(f"[OK] 版本一致: {version} (services={services})")
+    print(f"[OK] 六处版本一致: {version} (services={services})")
     return 0
 
 

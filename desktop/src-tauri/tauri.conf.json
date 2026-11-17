@@ -28,10 +28,26 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "publisher": "libyyu",
+    "copyright": "Copyright © 2026 libyyu",
+    "category": "DeveloperTool",
+    "shortDescription": "Plateau Dashboard",
+    "longDescription": "Plateau Dashboard 桌面工作台：本地 FastAPI 服务 + Vue 3 控制台。",
+    "icon": ["icons/icon.ico"],
     "resources": [
       "binaries/launcher",
       "binaries/dashboard",
       "binaries/cb"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "startMenuFolder": "Plateau"
+      }
+    }
   }
 }
