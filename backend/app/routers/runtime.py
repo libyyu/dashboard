@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 import urllib.request
 from pathlib import Path
 from typing import cast
@@ -17,7 +18,9 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter
 from starlette.responses import JSONResponse
 
+from app.adapters.sqlite_storage import SqliteStorage
 from app.core.errors import error_response
+from app.core.storage import DatabaseConfig
 from app.runtime import log_policy, package_version, ports
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime"])
@@ -25,10 +28,28 @@ router = APIRouter(prefix="/api/runtime", tags=["runtime"])
 # 完整端点（契约见 contracts/api.json）：
 #   GET  /api/runtime/status          BEST_EFFORT 轮询
 #   GET  /api/runtime/services        BEST_EFFORT 轮询
+#   GET  /api/runtime/storage         BEST_EFFORT，数据层自检
 #   POST /api/runtime/auth/login      CONTROL，永不 shed
 
 _CB_TIMEOUT = 2.0
 _LOGIN_TIMEOUT = 5.0
+_storage: SqliteStorage | None = None
+_storage_lock = threading.Lock()
+
+
+def _get_storage() -> SqliteStorage | None:
+    """按 DATABASE_URL 懒装配 SQLite 适配器；未配置返回 None（保持未迁移前的可运行性）。"""
+    global _storage
+    config = DatabaseConfig.from_env()
+    if not config.enabled:
+        return None
+    if config.dialect != "sqlite":
+        raise ValueError(f"当前只装配了 sqlite 适配器：{config.dialect}")
+    if _storage is None:
+        with _storage_lock:
+            if _storage is None:
+                _storage = SqliteStorage(config)
+    return _storage
 
 
 def _cb_origin() -> str:
@@ -137,6 +158,21 @@ async def runtime_services() -> dict[str, object]:
         "logs_dir": str(log_policy.logs_dir()),
         "services": items,
     }
+
+
+@router.get("/storage", response_model=None)
+async def runtime_storage() -> dict[str, object] | JSONResponse:
+    """数据层自检：dialect / schema 版本 / 各集合行数。未装配时返回 NOT_CONFIGURED。"""
+    if not DatabaseConfig.from_env().enabled:
+        return error_response("NOT_CONFIGURED", 503, "数据库未配置（DATABASE_URL 为空）")
+    try:
+        store = await asyncio.to_thread(_get_storage)
+        if store is None:
+            return error_response("NOT_CONFIGURED", 503, "数据库未配置")
+        health = await asyncio.to_thread(store.health)
+    except Exception as exc:  # noqa: BLE001 - 存储异常统一转成契约错误形状
+        return error_response("INTERNAL_ERROR", 500, f"存储不可用：{exc}")
+    return {"profile": ports.profile_id(), **health}
 
 
 @router.post("/auth/login", response_model=None)

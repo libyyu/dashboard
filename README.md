@@ -36,7 +36,7 @@ plateau-dashboard/
 ├── frontend/
 │   ├── src/
 │   │   ├── layouts/WorkbenchLayout.vue  # 工作台外壳（侧边栏 + 头部 + 内容区）
-│   │   ├── views/Home.vue               # 首页占位（模块建设中）
+│   │   ├── views/ModulePlaceholder.vue  # 模块占位页（graph / text / ai 建设中）
 │   │   ├── router/                      # 路由（后续模块在此注册）
 │   │   ├── stores/                      # Pinia 状态
 │   │   └── api/                         # 请求封装（契约类型 + mock + http）
@@ -46,9 +46,12 @@ plateau-dashboard/
 ├── packaging/               # PyInstaller spec + 冻结构建/组装脚本（build.py）
 ├── scripts/
 │   ├── ci_cheap.py               # 零依赖静态守卫（契约 / 解耦 / 车道 / 端口 / 日志 / 更新通道）
-│   ├── sync_version.py           # 版本号同步（VERSION + 5 处）
+│   ├── sync_version.py           # 版本号同步（VERSION + 6 处派生）
+│   ├── bump_version.py           # 升版本 + 记录更新内容 + 回写派生点
 │   ├── build_update_manifest.py  # 从 VERSION 生成 / 校验 updater 的 latest.json
 │   └── make_icon.py              # 生成多尺寸应用图标
+├── backend/app/adapters/        # 存储端口实现（SQLite + 版本化迁移）
+├── CHANGELOG.md                 # 每次改动的更新内容
 └── VERSION                  # 版本单一真源
 ```
 
@@ -176,7 +179,7 @@ python -m http.server 17865 --bind 127.0.0.1 --directory desktop/src-tauri/targe
 1. 把 `tauri.conf.json` 的 `endpoints` 改成 HTTPS URL，**删除** `dangerousInsecureTransportProtocol`。
 2. `python scripts/build_update_manifest.py --url https://<host>/Plateau_<版本>_x64-setup.exe --notes "..."`。
 3. 上传 `setup.exe`、`setup.exe.sig`、`latest.json` 三个文件。
-4. 改 `VERSION` → `python scripts/sync_version.py --update` → `python scripts/ci_cheap.py` → 重新构建。
+4. `python scripts/bump_version.py --notes "..."` 升版本并记录 → `python scripts/ci_cheap.py` → 重新构建。
 
 回滚：默认只允许 `version > 当前版本`，禁止降级。紧急回滚请**发布更高版本号、内容回退到上个 tag 的包**
 （例如 1.0.2 的内容 = 1.0.0）；单点回退可手动运行旧安装包 `/S`。
@@ -195,13 +198,37 @@ python -m http.server 17865 --bind 127.0.0.1 --directory desktop/src-tauri/targe
 | GET | `/api/logs/tail` | 日志尾部（level 过滤 + request-id 下钻） |
 | GET | `/api/runtime/status` | 运行时聚合（dashboard / cb / 登录态 / 端口 / 版本） |
 | GET | `/api/runtime/services` | 服务清单 |
+| GET | `/api/runtime/storage` | 数据层自检（dialect / schema 版本 / 集合行数） |
 | POST | `/api/runtime/auth/login` | 登录代理（转发 cb） |
+
+## 数据层
+
+`DATABASE_URL` 由 launcher 注入，指向 `<PLATEAU_HOME>/profiles/<profile>/plateau.db`（**安装目录之外**，自动更新覆盖不会丢数据）。
+
+- `backend/app/core/storage.py` 只有 `Storage` 端口与 `DatabaseConfig`，不含 SQL / 驱动。
+- `backend/app/adapters/sqlite_storage.py` 用 stdlib `sqlite3` 实现，`migrations.py` 集中版本化 DDL；零外部依赖，兼容 PyInstaller 冻结包。
+- 未配置 `DATABASE_URL` 时 `/api/runtime/storage` 返回 `NOT_CONFIGURED`（503），其余功能不受影响。
+
+## 版本与更新记录
+
+**约定：每次代码改动都升版本号，并在 `CHANGELOG.md` 记录更新内容。**
+
+```bash
+python scripts/bump_version.py --notes "修复 xxx"    # patch +1，自动回写 6 处派生版本
+python scripts/bump_version.py --minor --notes "新增 xxx"
+python scripts/bump_version.py --check               # CI 守卫，不写文件
+```
+
+`VERSION` 是唯一真源，`sync_version.py` 回写 `frontend/package.json`、`desktop/services.json`、
+`desktop/package.json`、`tauri.conf.json`、`contracts/api.json`、`Cargo.toml` 六处。
+`ci_cheap.py` 会拦截「版本不一致」和「CHANGELOG 缺当前版本条目」；
+自动更新弹窗的更新说明默认从 `CHANGELOG.md` 最新版本条目读取。
 
 ## 扩展方式
 
 新增一个工作台模块：
 
-1. 在 `frontend/src/views/` 下新建视图（参考 `Home.vue`）。
+1. 在 `frontend/src/views/` 下新建视图（参考 `console/ConsoleOverview.vue` 与占位页 `ModulePlaceholder.vue`）。
 2. 在 `frontend/src/router/index.ts` 的 `children` 里注册路由。
 3. 在 `frontend/src/layouts/WorkbenchLayout.vue` 侧边栏加一个 `el-menu-item`。
 4. 后端按 `backend/app/routers/` 每模块一个文件，在 `main.py` 里 `include_router`，并把端点同步进 `contracts/api.json`。
@@ -209,8 +236,8 @@ python -m http.server 17865 --bind 127.0.0.1 --directory desktop/src-tauri/targe
 ## 验证
 
 ```bash
-python scripts/ci_cheap.py                          # 零依赖静态守卫（含更新通道不变量）
-python scripts/sync_version.py                      # 六处版本一致
+python scripts/ci_cheap.py                          # 零依赖静态守卫（含契约 / 更新通道 / 数据层不变量）
+python scripts/bump_version.py --check              # 七处版本一致 + CHANGELOG 已记录
 python scripts/build_update_manifest.py --verify    # manifest 与 VERSION / .sig 一致
 cd frontend && npx tsc --noEmit && npm run build    # 前端独立验证
 cd desktop/src-tauri && cargo check                 # Rust 桌面壳

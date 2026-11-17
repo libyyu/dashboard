@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,6 +62,25 @@ def validate_url(url: str, setup_name: str) -> None:
         raise RuntimeError(f"URL 指向的文件名与安装包不一致：{url} != {setup_name}")
 
 
+def latest_notes(version: str) -> str:
+    """更新说明默认取 CHANGELOG.md 最新版本条目，避免发版时手工重复写一遍。"""
+    path = ROOT / "CHANGELOG.md"
+    if not path.is_file():
+        return f"Plateau Dashboard {version}"
+    text = path.read_text(encoding="utf-8")
+    match = re.search(
+        rf"(?ms)^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text
+    )
+    if match is None:
+        return f"Plateau Dashboard {version}"
+    lines = [
+        line.strip().lstrip("-").strip()
+        for line in match.group(1).splitlines()
+        if line.strip() and not line.strip().startswith("###")
+    ]
+    return "；".join(lines) or f"Plateau Dashboard {version}"
+
+
 def expected_manifest(version: str, signature: str, url: str, notes: str) -> dict[str, object]:
     return {
         "version": version,
@@ -84,7 +104,7 @@ def build(args: argparse.Namespace) -> int:
     validate_url(url, setup.name)
 
     out = Path(args.out).resolve() if args.out else setup.parent / "latest.json"
-    notes = args.notes or f"Plateau Dashboard {version}"
+    notes = args.notes or latest_notes(version)
     doc = expected_manifest(version, signature, url, notes)
     _ = out.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"[OK] 生成 {out}")

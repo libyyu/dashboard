@@ -2797,7 +2797,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "plateau-desktop"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "dirs 6.0.0",
  "reqwest 0.12.28",

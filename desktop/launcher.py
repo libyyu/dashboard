@@ -443,6 +443,9 @@ def main() -> int:
     shared_env["PLATEAU_HOME"] = str(home)
     shared_env["PLATEAU_LOGS_DIR"] = str(logs_root)
     shared_env["PLATEAU_SERVICES_JSON"] = str(ROOT / "services.json")
+    # 数据层：SQLite 落在 profile 目录（安装目录之外，自动更新覆盖不会丢数据）
+    db_path = (home / "profiles" / profile / "plateau.db").as_posix()
+    shared_env["DATABASE_URL"] = f"sqlite:///{db_path}"
     # 子进程 stdout 统一 utf-8：Windows 默认用 GBK 写管道，读取端按 utf-8 解会乱码
     shared_env["PYTHONIOENCODING"] = "utf-8"
     shared_env["PYTHONUTF8"] = "1"

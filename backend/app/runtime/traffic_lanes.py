@@ -48,7 +48,8 @@ _CONTROL_SUFFIXES = ("/cancel", "/interrupt", "/tool-approval")
 _STREAM_MARKERS = ("/stream", "/sse", "/v1/chat/completions")
 _BEST_EFFORT_CONTAINS = (
     "/observability", "/logs", "/transcript", "/assets", "/static",
-    "/api/runtime/status", "/api/runtime/services", "/api/agent/sessions",
+    "/api/runtime/status", "/api/runtime/services", "/api/runtime/storage",
+    "/api/agent/sessions",
 )
 
 SHED_BODY = {

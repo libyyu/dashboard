@@ -81,6 +81,9 @@ def build(name: str) -> None:
             str(PACKAGING / f"{name}.spec"),
         ],
         cwd=str(PROJECT), env=env, check=True,
+        # PyInstaller 日志走 stderr；并入 stdout 后 CI / IDE 能持续看到心跳，
+        # 也避免只有一路输出时长时间「无输出」被误判为卡死。
+        stderr=subprocess.STDOUT,
     )
     if name == "launcher":
         write_frozen_services(DIST / "launcher")

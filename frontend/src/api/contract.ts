@@ -10,6 +10,7 @@ export const ENDPOINTS = {
   logsTail: '/api/logs/tail',
   runtimeStatus: '/api/runtime/status',
   runtimeServices: '/api/runtime/services',
+  runtimeStorage: '/api/runtime/storage',
   runtimeLogin: '/api/runtime/auth/login',
   agentModels: '/api/agent/models',
   agentRunStream: '/api/agent/runs/stream',

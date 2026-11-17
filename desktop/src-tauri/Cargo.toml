@@ -1,6 +1,6 @@
 [package]
 name = "plateau-desktop"
-version = "1.0.0"
+version = "1.0.1"
 description = "Plateau Dashboard 桌面壳"
 edition = "2021"
 

@@ -8,7 +8,7 @@
 2. 时间统一 UTC aware datetime，写库前转换，不用数据库的当前时间方言
 3. JSON 字段走 set_json / get_json 抽象，由适配器决定列类型
 4. 不用方言专有的 upsert、批量插入语法或专属配置指令；冲突处理在业务层表达
-5. DDL 与迁移交给 Alembic，业务代码不写 CREATE TABLE
+5. DDL 与迁移集中在 adapters/migrations.py 的版本化脚本，业务代码不写 CREATE TABLE
 6. 连接串只来自 DATABASE_URL，驱动由 adapter 决定，业务层不 import 驱动
 """
 from __future__ import annotations

@@ -2,8 +2,8 @@
 """单一版本源 VERSION → 各组件回写 + 全量一致性检查。
 
 用法：
-  python scripts/sync_version.py             # 检查六处一致性（CI 用），不一致退出 1
-  python scripts/sync_version.py --update   # 把 VERSION 回写到其余五处
+  python scripts/sync_version.py             # 检查七处一致性（CI 用），不一致退出 1
+  python scripts/sync_version.py --update   # 把 VERSION 回写到其余六处
 
 借鉴 EvoFlow 的 evopanel/VERSION + sync-version.js：多服务打一个包时，
 避免「前端 1.0.0 / 后端 0.9.9 / 安装包 1.0.1」这类版本错配。
@@ -21,12 +21,13 @@ from typing import cast
 ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = ROOT / "VERSION"
 
-# VERSION 之外的五处派生版本（相对 ROOT）
+# VERSION 之外的六处派生版本（相对 ROOT）
 _JSON_TARGETS = (
     "frontend/package.json",
     "desktop/services.json",
     "desktop/package.json",
     "desktop/src-tauri/tauri.conf.json",
+    "contracts/api.json",
 )
 _CARGO_TOML = "desktop/src-tauri/Cargo.toml"
 
@@ -64,7 +65,7 @@ def component_versions() -> dict[str, str]:
 
 
 def version_problems() -> list[str]:
-    """VERSION 与五处派生版本不一致的问题列表；空列表代表一致。"""
+    """VERSION 与六处派生版本不一致的问题列表；空列表代表一致。"""
     version = read_version()
     return [
         f"{rel} version={found or '<缺失>'} != VERSION {version}"
@@ -125,7 +126,7 @@ def main() -> int:
     if problems:
         print("[FAIL] 版本不一致，运行 python scripts/sync_version.py --update")
         return 1
-    print(f"[OK] 六处版本一致: {version} (services={services})")
+    print(f"[OK] 七处版本一致: {version} (services={services})")
     return 0
 
 

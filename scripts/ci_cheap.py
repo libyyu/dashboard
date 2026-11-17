@@ -5,11 +5,13 @@
 避免「CI 长期红 → 没人看门禁」。本脚本可直接作为 pre-commit 或 CI 的 cheap lane。
 
 检查项：
-1. 版本一致性（VERSION / package.json / desktop/services.json）
+1. 版本一致性（VERSION + 6 处派生）与 CHANGELOG 更新记录
 2. 车道分类不变量（未知 /api/* 默认 DATA、Control 永不 shed、BEST_EFFORT 过载 shed）
 3. 端口派生稳定且落在 8100..8999
 4. 服务清单不含 9099 / RuoYi 后端
-5. 所有 Python 源文件语法可编译
+5. 契约端点 AST 精确校验（含 implemented:false 反向断言）
+6. 数据层 / 更新通道不变量
+7. 所有 Python 源文件语法可编译
 
 用法：python scripts/ci_cheap.py  （全部通过退出 0）
 """
@@ -56,7 +58,11 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 def main() -> int:
     services_doc = sync_version.read_services_doc()
     version_problems = sync_version.version_problems()
-    check("版本一致性（VERSION + 5 处）", not version_problems, "; ".join(version_problems))
+    check("版本一致性（VERSION + 6 处）", not version_problems, "; ".join(version_problems))
+    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    changelog_path = ROOT / "CHANGELOG.md"
+    changelog = changelog_path.read_text(encoding="utf-8") if changelog_path.is_file() else ""
+    check("CHANGELOG 已记录当前版本", f"## [{version}]" in changelog, version)
 
     check("未知 /api/* 默认 DATA", classify_path("/api/brand-new-slow-thing").lane is Lane.DATA)
     check("health 归 CONTROL", classify_path("/health/ready").lane is Lane.CONTROL)
@@ -142,14 +148,47 @@ def main() -> int:
     http_ts = (ROOT / "frontend" / "src" / "api" / "http.ts").read_text(encoding="utf-8")
     vite_cfg = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
 
-    def registered(path: str) -> bool:
-        if path in backend_src:
-            return True
-        return "/" + path.rsplit("/", 1)[-1] in backend_src
+    def collect_routes(files: tuple[Path, ...]) -> set[str]:
+        """AST 精确提取 @app/@router.get|post(path)，并拼接 APIRouter(prefix=...)。
 
-    check("契约端点都在后端注册",
-          all(registered(e["path"]) for e in endpoints if e["implemented"]))
-    check("契约端点都在前端常量里", all(e["path"] in contract_ts for e in endpoints))
+        旧守卫用 `path in src` 子串匹配，装饰器的后半段路径、注释、字符串里
+        出现一次就算「已注册」；这里改成解析语法树，避免假绿灯。
+        """
+        found: set[str] = set()
+        for path in files:
+            if not path.is_file():
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            prefix = ""
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Call)
+                        and ((isinstance(node.func, ast.Name) and node.func.id == "APIRouter")
+                             or (isinstance(node.func, ast.Attribute)
+                                 and node.func.attr == "APIRouter"))):
+                    for kw in node.keywords:
+                        if kw.arg == "prefix" and isinstance(kw.value, ast.Constant):
+                            prefix = str(kw.value.value)
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+                    continue
+                if node.func.attr not in {"get", "post", "put", "patch", "delete"}:
+                    continue
+                if not node.args or not isinstance(node.args[0], ast.Constant):
+                    continue
+                raw = node.args[0].value
+                if not isinstance(raw, str) or not raw.startswith("/"):
+                    continue
+                found.add(prefix + raw if prefix and raw != "/" else raw)
+        return found
+
+    registered_paths = collect_routes(backend_files)
+    implemented_paths = {str(e["path"]) for e in endpoints if e["implemented"]}
+    pending_paths = {str(e["path"]) for e in endpoints if not e["implemented"]}
+    missing = sorted(implemented_paths - registered_paths)
+    ghost = sorted(pending_paths & registered_paths)
+    check("契约已实现端点都真实注册（AST 精确）", not missing, str(missing))
+    check("契约未实现端点确实未注册", not ghost, str(ghost))
+    check("契约端点都在前端常量里", all(str(e["path"]) in contract_ts for e in endpoints))
     check("契约车道与 classify_path 一致",
           all(classify_path(e["path"]).lane.value == e["lane"] for e in endpoints))
     check("错误码契约双侧齐备", all(
@@ -188,12 +227,27 @@ def main() -> int:
     check("数据库走 DATABASE_URL 且不硬编码驱动",
           "DATABASE_URL" in core_src and "import sqlite3" not in core_src
           and "import sqlalchemy" not in core_src and "import psycopg" not in core_src)
-    check("Agent 端口与扩展点齐备", all(
-        name in agent_src for name in (
-            "ModelProvider", "ToolRegistry", "SkillRegistry", "SessionStore",
-            "Orchestrator", "AgentEvent", "MCPToolAdapter", "CBOpenAIProvider",
-        )
-    ))
+    check("Agent 端口仅定义契约（尚无实现，不代表可用）",
+          all(name in agent_src for name in (
+              "ModelProvider", "ToolRegistry", "SkillRegistry", "SessionStore",
+              "Orchestrator", "AgentEvent", "MCPToolAdapter", "CBOpenAIProvider",
+          )) and contract["architecture"]["agent"]["enabled"] is False)
+    check("契约 agent 开关与「尚无实现」一致",
+          contract["architecture"]["agent"]["enabled"] is False)
+
+    # 数据层：core 仍是纯端口，DDL 与驱动只在 adapters；契约开关与装配层一致。
+    router_src = (ROOT / "backend" / "app" / "routers" / "runtime.py").read_text(encoding="utf-8")
+    adapter_dir = ROOT / "backend" / "app" / "adapters"
+    adapter_src = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(adapter_dir.glob("*.py"))
+    )
+    check("契约 database 开关与 adapter 一致",
+          contract["architecture"]["database"]["enabled"] is True
+          and "class SqliteStorage" in adapter_src
+          and "SqliteStorage" in router_src)
+    check("launcher 注入 DATABASE_URL", "DATABASE_URL" in launcher_src)
+    check("迁移 DDL 集中在 adapters",
+          "CREATE TABLE" in adapter_src and "CREATE TABLE" not in router_src)
 
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     check("日志被 gitignore", "*.log" in gitignore and "logs/" in gitignore)

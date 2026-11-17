@@ -5,6 +5,8 @@
 
 ## 0. 当前状态基线
 
+> 下表是 **1.0.0 基线时**的验证记录；当前版本以 `VERSION` / `CHANGELOG.md` 为准，版本流程见 `README.md`「版本与更新记录」。
+
 | 项 | 状态 |
 |---|---|
 | 实现 | 提交 `e538620`，纯 Rust 实现（`desktop/src-tauri/src/updater.rs`）+ 发布脚本（`scripts/build_update_manifest.py`） |
@@ -64,28 +66,31 @@ $nsis = "$repo/desktop/src-tauri/target/release/bundle/nsis"
 $site = "$repo/update-site"            # 已 gitignore
 New-Item -ItemType Directory -Force $site | Out-Null
 
-# 1) 备份基线 1.0.0 安装包（用于安装「旧版本」）
-Copy-Item "$nsis/Plateau_1.0.0_x64-setup.exe" "$site/Plateau_1.0.0_x64-setup.exe"
+$cur = (Get-Content VERSION -Raw).Trim()   # 当前版本
+$next = "1.0.2"                            # 改成你的目标版本
 
-# 2) 把 VERSION 改成 1.0.1（手工编辑），然后同步六处版本 + 守卫
-python scripts/sync_version.py --update
+# 1) 备份当前版本安装包（用于安装「旧版本」）
+Copy-Item "$nsis/Plateau_${cur}_x64-setup.exe" "$site/"
+
+# 2) 升版本 + 记录更新内容（自动回写 6 处派生版本）
+python scripts/bump_version.py --version $next --notes "自动更新端到端验收"
 python scripts/ci_cheap.py
 
-# 3) 重新组装冻结资源（仅当 Python/前端源码有改动时需要）
-python packaging/build.py --sdk-cli <path> all --assemble
+# 3) 重新组装冻结资源（Python / 前端源码有改动时需要）
+python packaging/build.py launcher dashboard --assemble
 
-# 4) 带签名构建 1.0.1
+# 4) 带签名构建新版本
 $env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\plateau.key"
 cd desktop; npx tauri build; cd ..
 
-# 5) 把新包与签名放进站点目录，生成指向 1.0.1 的 manifest
-Copy-Item "$nsis/Plateau_1.0.1_x64-setup.exe" "$site/"
-Copy-Item "$nsis/Plateau_1.0.1_x64-setup.exe.sig" "$site/"
+# 5) 把新包与签名放进站点目录，生成 manifest（更新说明默认取 CHANGELOG）
+Copy-Item "$nsis/Plateau_${next}_x64-setup.exe" "$site/"
+Copy-Item "$nsis/Plateau_${next}_x64-setup.exe.sig" "$site/"
 python scripts/build_update_manifest.py `
-  --setup "$site/Plateau_1.0.1_x64-setup.exe" `
-  --url "http://127.0.0.1:17865/Plateau_1.0.1_x64-setup.exe" `
-  --out "$site/latest.json" --notes "自动更新端到端验收"
-python scripts/build_update_manifest.py --setup "$site/Plateau_1.0.1_x64-setup.exe" --verify
+  --setup "$site/Plateau_${next}_x64-setup.exe" `
+  --url "http://127.0.0.1:17865/Plateau_${next}_x64-setup.exe" `
+  --out "$site/latest.json"
+python scripts/build_update_manifest.py --setup "$site/Plateau_${next}_x64-setup.exe" --verify
 ```
 
 ### 1.3 起本地更新服务器
@@ -145,8 +150,8 @@ Start-Process -FilePath "$site/Plateau_1.0.0_x64-setup.exe" -ArgumentList '/S' -
 # 停服务器、卸载测试安装、删除隔离 profile
 Remove-Item -Recurse -Force $env:PLATEAU_HOME
 Remove-Item -Recurse -Force $site
-# 把 VERSION 改回 1.0.0，再跑一次同步 + 守卫，避免仓库版本漂移
-python scripts/sync_version.py --update
+# 版本升级与 CHANGELOG 是正式产物，保留；只清理临时数据
+python scripts/bump_version.py --check
 python scripts/ci_cheap.py
 ```
 
@@ -172,8 +177,8 @@ python scripts/ci_cheap.py
 ### 2.2 每次发版 SOP
 
 ```bash
-# 1. 版本：只改 VERSION 这一个文件
-python scripts/sync_version.py --update        # 回写 6 处
+# 1. 升版本 + 记录更新内容（VERSION 是唯一真源，自动回写 6 处派生）
+python scripts/bump_version.py --version <ver> --notes "<本次变更摘要>"
 python scripts/ci_cheap.py                     # 全绿才继续
 
 # 2. 组装 + 守卫
@@ -206,7 +211,7 @@ python scripts/build_update_manifest.py --verify
 - 触发：`workflow_dispatch`（沿用「push 只跑 cheap lane、重活手动触发」的约定）。
 - Runner：Windows，装 Python / Node / Rust。
 - 步骤：注入两个签名 Secret → 复用 2.2 的 1~5 步 → 上传三个 artifact 到托管位置。
-- 门禁：`ci_cheap.py` + `sync_version.py` + `build_update_manifest.py --verify` 任一失败即中止。
+- 门禁：`ci_cheap.py` + `bump_version.py --check` + `build_update_manifest.py --verify` 任一失败即中止。
 
 ### 2.4 灰度与渠道
 
