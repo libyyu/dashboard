@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "version": "1.0.0",
+  "note": "前后端契约单一真源。前后端各自独立验证：前端 VITE_API_MOCK=1 离线跑 + npm run build；后端 python scripts/ci_cheap.py 静态守卫。任一侧不得 import 对方代码。",
+  "base_url": "/",
+  "headers": {
+    "request": ["x-request-id", "content-type"],
+    "response": ["x-request-id", "x-plateau-lane", "x-plateau-shed", "retry-after"]
+  },
+  "error_shape": {
+    "error": {"code": "string", "message": "string", "request_id": "string?"}
+  },
+  "error_codes": [
+    "GATEWAY_OVERLOAD_SHED",
+    "INTERNAL_ERROR",
+    "INVALID_SOURCE",
+    "CB_UNAVAILABLE",
+    "CB_LOGIN_FAILED",
+    "NOT_CONFIGURED",
+    "REQUEST_TIMEOUT"
+  ],
+  "endpoints": [
+    {"path": "/health/liveness", "method": "GET", "lane": "control", "implemented": true, "response": "Liveness", "notes": "sync def 走 threadpool，event loop 卡住也能答"},
+    {"path": "/health/ready", "method": "GET", "lane": "control", "implemented": true, "response": "Readiness|503", "notes": "503 带 phase，表示启动中而非故障"},
+    {"path": "/health", "method": "GET", "lane": "control", "implemented": true, "response": "Health", "notes": "200 也可能是 degraded"},
+    {"path": "/api/ping", "method": "GET", "lane": "control", "implemented": true, "response": "Ping"},
+    {"path": "/api/logs/sources", "method": "GET", "lane": "best_effort", "implemented": true, "response": "LogSources"},
+    {"path": "/api/logs/tail", "method": "GET", "lane": "best_effort", "implemented": true, "response": "LogTail|400", "notes": "source 必须是日志目录下按日文件名；level/request_id 可选过滤"},
+    {"path": "/api/runtime/status", "method": "GET", "lane": "best_effort", "implemented": true, "response": "RuntimeStatus", "notes": "聚合 dashboard/cb/登录态/端口/版本；轮询类，过载可 shed"},
+    {"path": "/api/runtime/services", "method": "GET", "lane": "best_effort", "implemented": true, "response": "ServiceList"},
+    {"path": "/api/runtime/auth/login", "method": "POST", "lane": "control", "implemented": true, "response": "AuthLogin|503|502", "notes": "控制类，永不 shed"},
+    {"path": "/api/agent/models", "method": "GET", "lane": "control", "implemented": false, "response": "ModelList", "notes": "ModelProvider.list_models"},
+    {"path": "/api/agent/runs/stream", "method": "POST", "lane": "stream", "implemented": false, "response": "SSE<AgentEvent>", "notes": "不占 REST inflight，永不 shed"},
+    {"path": "/api/agent/runs/{id}/cancel", "method": "POST", "lane": "control", "implemented": false, "response": "CancelResult", "notes": "取消永不 shed"},
+    {"path": "/api/agent/sessions/{id}/events", "method": "GET", "lane": "best_effort", "implemented": false, "response": "AgentEvent[]", "notes": "SessionStore.read_events"},
+    {"path": "/api/graph/nodes", "method": "GET", "lane": "data", "implemented": false, "response": "GraphNodes"},
+    {"path": "/api/search", "method": "GET", "lane": "data", "implemented": false, "response": "SearchResults"}
+  ],
+  "architecture": {
+    "layering": ["frontend", "contracts/api.json", "api/routers", "core/ports", "adapters"],
+    "dependency_rule": "adapters -> core <- api；core 不放框架代码、SQL、驱动；前端不 import 后端代码",
+    "database": {
+      "config_env": "DATABASE_URL",
+      "port": "app.core.storage.Storage",
+      "enabled": false,
+      "dialects": ["sqlite", "postgresql", "mysql"],
+      "rules": ["UUID 主键", "UTC aware 时间", "JSON 抽象", "Alembic 迁移", "业务层不见 SQL"]
+    },
+    "agent": {
+      "port": "app.core.agent",
+      "provider": "cb-openai",
+      "enabled": false,
+      "extensions": ["mcp", "skill", "multi-agent"],
+      "stream_lane": "STREAM",
+      "cancel_lane": "CONTROL"
+    },
+    "validation": {
+      "independent": true,
+      "frontend": "VITE_API_MOCK=1 npm run dev / npm run build",
+      "backend": "python scripts/ci_cheap.py"
+    }
+  }
+}
