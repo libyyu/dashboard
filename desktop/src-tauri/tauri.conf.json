@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["nsis"],
     "publisher": "libyyu",
     "copyright": "Copyright © 2026 libyyu",
@@ -47,6 +48,16 @@
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "startMenuFolder": "Plateau"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU4NEJDQTUzMzZDNkQ3RDcKUldUWDE4WTJVOHBMV004dTNVaU9TY2o0TmlKajhzTFNEZzRCd2ZjdjdLeHl4eTRvL0tWSnkwNUUK",
+      "endpoints": ["http://127.0.0.1:17865/latest.json"],
+      "dangerousInsecureTransportProtocol": true,
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

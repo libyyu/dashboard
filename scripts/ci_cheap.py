@@ -25,6 +25,7 @@ import tempfile
 from contextlib import redirect_stdout
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend" / "app" / "runtime"))
@@ -196,6 +197,33 @@ def main() -> int:
 
     gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     check("日志被 gitignore", "*.log" in gitignore and "logs/" in gitignore)
+    check("更新产物被 gitignore", "latest.json" in gitignore and "*.sig" in gitignore)
+
+    # 更新通道不变量：公钥必须是真值；http 端点只允许 loopback，
+    # 防止 dangerousInsecureTransportProtocol 被带到公网部署。
+    tauri_cfg = json.loads((ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+    updater_cfg = tauri_cfg.get("plugins", {}).get("updater", {})
+    pubkey = str(updater_cfg.get("pubkey", ""))
+    endpoints = [str(u) for u in updater_cfg.get("endpoints", [])]
+    insecure = bool(updater_cfg.get("dangerousInsecureTransportProtocol"))
+    loopback = {"127.0.0.1", "localhost", "::1"}
+    check("updater 公钥已配置", len(pubkey) >= 80 and "PLACEHOLDER" not in pubkey.upper())
+    check("updater 生成签名产物", tauri_cfg.get("bundle", {}).get("createUpdaterArtifacts") is True)
+    check("updater 端点非空", bool(endpoints))
+    check("insecure 开关仅限本机联调",
+          not insecure or all(
+              urlparse(u).scheme == "http" and (urlparse(u).hostname or "") in loopback
+              for u in endpoints
+          ), str(endpoints))
+    check("NSIS 更新为 passive 模式", updater_cfg.get("windows", {}).get("installMode") == "passive")
+
+    updater_src = (ROOT / "desktop" / "src-tauri" / "src" / "updater.rs").read_text(encoding="utf-8")
+    check("更新走三段式且不覆盖退出钩子",
+          ".on_before_exit(" not in updater_src
+          and "spawn::stop_launcher()" in updater_src
+          and "report_failure(" not in updater_src)
+    lib_src = (ROOT / "desktop" / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
+    check("后台检查独立于 boot 链路", "updater::schedule" in lib_src and "检查更新" in lib_src)
 
     buffer = io.StringIO()
     with redirect_stdout(buffer):

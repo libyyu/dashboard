@@ -17,7 +17,7 @@ fn profile() -> String {
 
 /// 与 backend/app/runtime/ports.py::home_dir() 语义严格一致：
 /// PLATEAU_HOME 若设置，本身就是 ~/.plateau-dashboard 这个根目录，不能再拼一层。
-fn profile_dir() -> Option<PathBuf> {
+pub(crate) fn profile_dir() -> Option<PathBuf> {
     let root = match std::env::var("PLATEAU_HOME") {
         Ok(raw) => PathBuf::from(raw),
         Err(_) => dirs::home_dir()?.join(".plateau-dashboard"),

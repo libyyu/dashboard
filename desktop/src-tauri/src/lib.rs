@@ -1,4 +1,5 @@
 mod spawn;
+mod updater;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -18,15 +19,21 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_main(app);
         }))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // 旁路后台线程：spawn launcher.exe + 等 dashboard 就绪后导航窗口。
             let handle = app.handle().clone();
             std::thread::spawn(move || spawn::boot(&handle));
 
+            // 更新检查独立后台线程，失败只写日志，绝不阻塞/污染首屏。
+            updater::schedule(app.handle().clone());
+
             let show = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
             let logs = MenuItem::with_id(app, "logs", "打开日志目录", true, None::<&str>)?;
+            let update = MenuItem::with_id(app, "update", "检查更新", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出 Plateau", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &logs, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &logs, &update, &quit])?;
 
             let mut tray = TrayIconBuilder::new().menu(&menu);
             if let Some(icon) = app.default_window_icon() {
@@ -36,6 +43,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => focus_main(app),
                     "logs" => spawn::open_logs_dir(app),
+                    "update" => updater::check_now(app.clone()),
                     "quit" => {
                         spawn::stop_launcher();
                         app.exit(0);
