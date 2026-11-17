@@ -161,7 +161,7 @@ fn report_failure(app: &tauri::AppHandle, msg: &str) {
 /// 最多等 60s：等本次 run 的 ready 标记 + 探活，成功后导航到 dashboard。
 fn wait_and_navigate(app: &tauri::AppHandle, id: &str) {
     let dir = profile_dir();
-    for _ in 0..120 {
+    for _ in 0..300 {
         if launcher_exited() {
             report_failure(app, "launcher 提前退出（单实例锁 / 端口冲突 / 启动异常），服务未拉起。");
             return;
@@ -179,7 +179,7 @@ fn wait_and_navigate(app: &tauri::AppHandle, id: &str) {
                 }
             }
         }
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(200));
     }
     report_failure(app, "dashboard 未在 60 秒内就绪。");
 }

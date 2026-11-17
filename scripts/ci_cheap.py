@@ -225,6 +225,26 @@ def main() -> int:
     lib_src = (ROOT / "desktop" / "src-tauri" / "src" / "lib.rs").read_text(encoding="utf-8")
     check("后台检查独立于 boot 链路", "updater::schedule" in lib_src and "检查更新" in lib_src)
 
+    # 子进程 stdout 编码：外部 CLI / Node 在 Windows 按系统 ANSI（GBK）写管道，
+    # 一律 utf-8 + replace 会让 /api/logs/tail 的 RAW 行变成成串菱形乱码。
+    sys.path.insert(0, str(ROOT / "desktop"))
+    import launcher  # noqa: E402
+    launcher_src = (ROOT / "desktop" / "launcher.py").read_text(encoding="utf-8")
+    gbk_sample = "配置目录: C:/tmp/plateau-profile"
+    utf8_sample = "正常 UTF-8 输出"
+    check("GBK 子进程 stdout 可还原中文", launcher._decode_output(gbk_sample.encode("gbk")) == gbk_sample)
+    check("UTF-8 子进程 stdout 不被改写",
+          launcher._decode_output(utf8_sample.encode("utf-8")) == utf8_sample)
+    check("stdout 泵走编码归一", "_decode_output(raw)" in launcher_src)
+
+    # WebView2 首帧前的窗口背景必须与 loading 页同色，否则白屏跳变。
+    loading_src = (ROOT / "desktop" / "src-tauri" / "loading" / "index.html").read_text(encoding="utf-8")
+    windows_cfg = tauri_cfg.get("app", {}).get("windows") or [{}]
+    bg = windows_cfg[0].get("backgroundColor")
+    check("窗口背景与 loading 页同色", isinstance(bg, str) and bg.lower() in loading_src.lower(), str(bg))
+    spawn_src = (ROOT / "desktop" / "src-tauri" / "src" / "spawn.rs").read_text(encoding="utf-8")
+    check("就绪轮询不慢于 200ms", "Duration::from_millis(200)" in spawn_src)
+
     buffer = io.StringIO()
     with redirect_stdout(buffer):
         syntax_ok = True

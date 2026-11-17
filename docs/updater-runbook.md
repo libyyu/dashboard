@@ -59,7 +59,7 @@ $env:PLATEAU_HOME = "$env:TEMP\plateau-update-e2e"
 updater 默认只接受 `version > current`，所以必须有一旧一新两个包。
 
 ```powershell
-$repo = 'c:/Users/maxweili/MyProjects/MyPlateau/plateau-dashboard'
+$repo = (Get-Location).Path   # 在仓库根目录执行
 $nsis = "$repo/desktop/src-tauri/target/release/bundle/nsis"
 $site = "$repo/update-site"            # 已 gitignore
 New-Item -ItemType Directory -Force $site | Out-Null

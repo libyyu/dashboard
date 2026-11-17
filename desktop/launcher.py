@@ -337,8 +337,24 @@ def _shutdown() -> None:
         _logging_setup.shutdown_logging()
 
 
+def _decode_output(raw: bytes) -> str:
+    """子进程 stdout 编码不统一，逐行归一成 UTF-8。
+
+    PYTHONIOENCODING / PYTHONUTF8 只管得到 Python 进程；cb 拉起的外部 CLI / Node
+    子进程在 Windows 上仍按系统 ANSI（GBK）写管道。若一律 utf-8 + replace，
+    一个 GBK 汉字会变成两个 U+FFFD，日志页就是成串的菱形乱码（RAW 行）。
+    逐行先按 UTF-8 strict 解，失败再回退系统 ANSI；仍然失败才 replace。
+    """
+    with contextlib.suppress(UnicodeDecodeError):
+        return raw.decode("utf-8")
+    for encoding in ("mbcs", "gbk", "cp936"):
+        with contextlib.suppress(UnicodeDecodeError, LookupError):
+            return raw.decode(encoding)
+    return raw.decode("utf-8", errors="replace")
+
+
 def _pump_stdout(proc: subprocess.Popen[bytes], handle: TextIO, redact: Callable[[str], str]) -> None:
-    """子进程 stdout 泵：按行 utf-8 解码 → 脱敏 → 落盘。
+    """子进程 stdout 泵：逐行编码归一 → 脱敏 → 以 UTF-8 落盘。
 
     子进程退出后管道 EOF，循环结束并关闭文件；写前统一过 redact_text，
     敏感信息不以明文落盘（展示层 /api/logs/tail 还有第二道兜底脱敏）。
@@ -350,7 +366,7 @@ def _pump_stdout(proc: subprocess.Popen[bytes], handle: TextIO, redact: Callable
         return
     try:
         for raw in iter(stream.readline, b""):
-            handle.write(redact(raw.decode("utf-8", errors="replace")))
+            handle.write(redact(_decode_output(raw)))
             handle.flush()
     finally:
         with contextlib.suppress(Exception):
