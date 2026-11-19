@@ -1,32 +1,28 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import WorkbenchLayout from '../layouts/WorkbenchLayout.vue'
 import ModulePlaceholder from '../views/ModulePlaceholder.vue'
+import type { PluginInfo } from '../api/contract'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
       path: '/',
+      name: 'workbench',
       component: WorkbenchLayout,
       children: [
-        { path: '', redirect: '/graph' },
+        { path: '', redirect: '/plugins' },
         {
-          path: 'graph',
-          name: 'graph',
-          component: ModulePlaceholder,
-          meta: { title: '玩法图谱', description: '玩法结构可视化与节点关系探索，建设中', group: 'workspace' },
+          path: 'plugins',
+          name: 'plugin-store',
+          component: () => import('../views/plugins/PluginStore.vue'),
+          meta: { title: '插件仓库', description: '浏览、安装与卸载插件', group: 'workspace' },
         },
         {
-          path: 'text',
-          name: 'text',
-          component: ModulePlaceholder,
-          meta: { title: '文本检索', description: '全文检索与内容定位，建设中', group: 'workspace' },
-        },
-        {
-          path: 'ai',
-          name: 'ai',
-          component: ModulePlaceholder,
-          meta: { title: 'AI 助手', description: '对话式智能助手，建设中', group: 'workspace' },
+          path: 'chat',
+          name: 'chat',
+          component: () => import('../views/chat/ChatView.vue'),
+          meta: { title: 'AI 助手', description: '与本地大模型流式对话', group: 'workspace' },
         },
         {
           path: 'console',
@@ -44,5 +40,28 @@ const router = createRouter({
     },
   ],
 })
+
+// 插件前端入口当前为占位（各插件 dist 尚未实现），统一渲染 ModulePlaceholder。
+// 后续插件落地 dist 后，改为按 routes[].entry 运行时懒加载。
+export function registerPluginRoutes(plugins: PluginInfo[]) {
+  for (const plugin of plugins) {
+    if (!plugin.enabled) continue
+    // sidecar 纯服务插件（无 routes）不注册前端路由：只提供底层能力，没有页面。
+    const paths = (plugin.routes ?? []).map((r) => r.path).filter(Boolean)
+    if (!paths.length) continue
+    const title = plugin.menu?.title ?? plugin.name ?? plugin.id
+    for (const p of paths) {
+      const rel = p.replace(/^\//, '')
+      const full = '/' + rel
+      if (router.hasRoute(full)) continue
+      router.addRoute('workbench', {
+        path: rel,
+        name: `plugin-${rel.replace(/\//g, '-')}`,
+        component: ModulePlaceholder,
+        meta: { title, description: `插件「${title}」`, group: 'plugin' },
+      })
+    }
+  }
+}
 
 export default router

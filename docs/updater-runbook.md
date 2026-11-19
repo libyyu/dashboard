@@ -122,12 +122,12 @@ Start-Process -FilePath "$site/Plateau_1.0.0_x64-setup.exe" -ArgumentList '/S' -
 |---|---|---|
 | 1 | 弹窗 | 版本号、更新说明正确；点「稍后」不下载、不停服务 |
 | 2 | 下载 | `<profile>/logs/desktop-update.log` 出现「下载完成 … 签名校验通过」 |
-| 3 | 安装前进程 | 用进程列表确认 `launcher.exe` / `dashboard.exe` / `cb.exe` 已退出，安装目录无文件锁 |
+| 3 | 安装前进程 | 用进程列表确认 `launcher.exe` / `dashboard.exe` 已退出，安装目录无文件锁 |
 | 4 | 安装界面 | NSIS 进度条（`/P`），无 UAC 弹窗 |
 | 5 | 自动重启 | 安装完成后新 exe 自动拉起，首屏导航到 `/console` |
 | 6 | 版本 | 运行时聚合 `/api/runtime/status` 显示 `1.0.1` |
 | 7 | 状态文件 | `launcher.lock` / `launcher.ready.json` / `launcher.stop` 无残留，新 `run_id` 生效 |
-| 8 | 用户数据 | 升级前后比对 `<profile>` 下日志、DB、SDK 缓存未被清除 |
+| 8 | 用户数据 | 升级前后比对 `<profile>` 下日志、DB 未被清除 |
 | 9 | 单实例 | 再启动一个实例仍只聚焦原窗口，不重复拉 launcher |
 | 10 | 开始菜单 | 只有一个 Plateau 项，无重复快捷方式 |
 | 11 | 卸载 | 静默卸载成功（`uninstall_exit=0`），安装目录移除 |
@@ -182,8 +182,8 @@ python scripts/bump_version.py --version <ver> --notes "<本次变更摘要>"
 python scripts/ci_cheap.py                     # 全绿才继续
 
 # 2. 组装 + 守卫
-python packaging/build.py --sdk-cli <path> all --assemble
-python packaging/build.py verify               # 8 项资源齐备
+python packaging/build.py all --assemble
+python packaging/build.py verify               # 6 项资源齐备
 
 # 3. 带签名构建（PowerShell）
 #    $env:TAURI_SIGNING_PRIVATE_KEY = ... ; npx tauri build

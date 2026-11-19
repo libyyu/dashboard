@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "product": "plateau-dashboard",
-  "version": "1.0.1",
-  "note": "桌面包清单（产品元数据 + 服务清单）。仅 dashboard backend 与 cb；不含 RuoYi 后端(9099)。cb 路径由 PLATEAU_CB_HOME 覆盖，未配置时跳过（fail-open）。",
+  "version": "1.0.15",
+  "note": "桌面包清单（产品元数据 + 服务清单）。仅 dashboard backend；cb 已外置为 sidecar 插件，从 plateau-registry 安装。不含 RuoYi 后端(9099)。",
   "services": [
     {
       "name": "dashboard",
@@ -14,21 +14,6 @@
       "health_path": "/health/liveness",
       "ready_path": "/health/ready",
       "required": true
-    },
-    {
-      "name": "cb",
-      "command": [
-        "python",
-        "server.py",
-        "-p",
-        "{port}",
-        "--config-dir",
-        "{cb_config_dir}"
-      ],
-      "cwd": "{cb_home}",
-      "health_path": "/health",
-      "ready_path": null,
-      "required": false
     }
   ]
 }

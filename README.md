@@ -25,8 +25,8 @@ plateau-dashboard/
 ├── contracts/
 │   └── api.json             # 前后端契约单一真源（端点 / 车道 / 错误码 / 架构约束）
 ├── desktop/                 # 桌面包装配层：多服务编排 + Tauri 壳
-│   ├── launcher.py          # 单 owner 启动 / 探活 / 关停 dashboard + cb
-│   ├── services.json        # 包清单（产品元数据 + 服务清单，仅 dashboard 与 cb）
+│   ├── launcher.py          # 单 owner 启动 / 探活 / 关停 dashboard + 已装 sidecar 插件
+│   ├── services.json        # 包清单（产品元数据 + 服务清单，仅 dashboard）
 │   ├── package.json         # Tauri CLI 入口
 │   └── src-tauri/           # Rust 薄壳：spawn sidecar / 探活导航 / 关闭清理
 │       ├── src/             # lib.rs / main.rs / spawn.rs / updater.rs（自动更新）
@@ -100,8 +100,8 @@ python desktop/launcher.py --dry-run  # 只打印解析结果
 
 ```bash
 cd frontend && npm install && npm run build && cd ..
-python packaging/build.py --sdk-cli <codebuddy-headless.exe 路径> all --assemble
-python packaging/build.py verify           # 校验三个 exe / 冻结清单 / 前端产物 / SDK CLI 齐备
+python packaging/build.py all --assemble
+python packaging/build.py verify           # 校验两个 exe / 冻结清单 / 前端产物齐备
 cd desktop && npm install
 # Windows PowerShell：更新签名私钥必须作为真实环境变量注入（.env 文件不生效）
 $env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\plateau.key"
@@ -111,17 +111,16 @@ npx tauri build
 #   Plateau_1.0.0_x64-setup.exe.sig  updater 签名
 ```
 
-`codebuddy-headless.exe` 是桌面包的必需资源：首次通过 `--sdk-cli`（或 `PLATEAU_SDK_CLI`）提供后
-会缓存到 `packaging/vendor/`，组装时复制到 `binaries/cb/bin/`，随 NSIS 包一起分发；
-launcher 启动时会注入 `CODEBUDDY_CODE_PATH` 指向它。缺少时 `assemble` 直接失败，不产出残缺包。
+cb 已外置为 sidecar 插件，不再随桌面包内置：用 `scripts/build_cb_plugin.py` 打包成
+`cb-openai-<version>.zip` 上传 registry，桌面包通过 `/api/plugins/install` 安装后由 launcher 拉起。
 
 桌面壳是单实例：重复打开会把已有窗口唤到前台。关闭窗口只隐藏到托盘，服务继续运行；
 托盘菜单提供「显示窗口 / 打开日志目录 / 检查更新 / 退出 Plateau」，退出时通过 `launcher.stop`
-触发有序关停（关停 dashboard、cb 并清理 `launcher.lock` / `launcher.ready.json`）。
+触发有序关停（关停 dashboard 及已装 sidecar 插件，并清理 `launcher.lock` / `launcher.ready.json`）。
 
 `build/`、`desktop/src-tauri/binaries/`、`desktop/src-tauri/target/`、`packaging/vendor/`
 均为构建产物，不入库。图标由 `scripts/make_icon.py` 生成，可直接覆盖 `icons/icon.ico` 换成正式素材。
-cb 是外部独立仓库，通过 `PLATEAU_CB_REPO` 指定路径。
+cb 插件打包脚本 `scripts/build_cb_plugin.py` 从 `PLATEAU_CB_REPO` 读取 cb 仓库。
 
 ### 6. 自动更新（当前：本机更新服务器）
 
@@ -196,10 +195,10 @@ python -m http.server 17865 --bind 127.0.0.1 --directory desktop/src-tauri/targe
 | GET | `/api/ping` | 服务标识 |
 | GET | `/api/logs/sources` | 日志源列表 |
 | GET | `/api/logs/tail` | 日志尾部（level 过滤 + request-id 下钻） |
-| GET | `/api/runtime/status` | 运行时聚合（dashboard / cb / 登录态 / 端口 / 版本） |
+| GET | `/api/runtime/status` | 运行时聚合（dashboard / model provider / 登录态 / 端口 / 版本） |
 | GET | `/api/runtime/services` | 服务清单 |
 | GET | `/api/runtime/storage` | 数据层自检（dialect / schema 版本 / 集合行数） |
-| POST | `/api/runtime/auth/login` | 登录代理（转发 cb） |
+| POST | `/api/runtime/auth/login` | 登录代理（转发 model provider） |
 
 ## 数据层
 

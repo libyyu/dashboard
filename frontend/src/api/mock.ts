@@ -1,7 +1,15 @@
 // 离线 mock：VITE_API_MOCK=1 时前端完全不连后端，可独立开发/验证。
 // 数据形状遵循 contracts/api.json；不依赖任何后端模块。
 
-import type { AuthLoginResult, LogSources, LogTail, RuntimeStatus, ServiceList } from './contract'
+import type {
+  AuthLoginResult,
+  LogSources,
+  LogTail,
+  PluginList,
+  RegistryCatalog,
+  RuntimeStatus,
+  ServiceList,
+} from './contract'
 
 const now = () => new Date().toISOString()
 
@@ -53,8 +61,89 @@ const logTail = (): LogTail => ({
   ],
 })
 
+const plugins = (): PluginList => ({
+  plugins: [
+    {
+      id: 'cb-openai',
+      version: '2.0.0',
+      kind: 'sidecar',
+      name: 'CB大模型',
+      requires: [],
+      provides: 'model',
+      enabled: true,
+      installed_at: now(),
+    },
+  ],
+})
+
+const modelProviders = () => ({
+  providers: [
+    {
+      name: 'cb-openai',
+      display_name: 'CB大模型',
+      base_url: 'http://127.0.0.1:8708',
+      source: 'sidecar',
+      api_type: 'agent-events',
+      auth: 'login',
+      protocols: ['agent-events', 'openai-completions'],
+    },
+    {
+      name: 'zhipu-mock',
+      display_name: '智谱（mock）',
+      base_url: 'https://open.bigmodel.cn/api/paas/v4',
+      source: 'registry',
+      api_type: 'openai-completions',
+      auth: 'api-key',
+    },
+  ],
+  default: 'cb-openai',
+})
+
+const registry = (): RegistryCatalog => ({
+  schema: 1,
+  plugins: [
+    {
+      id: 'cb-openai',
+      name: 'CB大模型',
+      description: 'OpenAI 兼容大模型服务（/v1/models、/v1/chat/completions、/auth/*），sidecar 常驻。',
+      kind: 'sidecar',
+      latest_version: '2.0.0',
+      requires: [],
+      provides: 'model',
+    },
+    {
+      id: 'graph-atlas',
+      name: '玩法图谱',
+      description: '玩法结构可视化与节点关系探索。',
+      kind: 'frontend',
+      latest_version: '1.0.0',
+      requires: ['graph'],
+    },
+    {
+      id: 'text-search',
+      name: '文本检索',
+      description: '全文检索与内容定位。',
+      kind: 'frontend',
+      latest_version: '1.0.0',
+      requires: ['search'],
+    },
+  ],
+  reachable: true,
+})
+
 export function mockResponse<T>(path: string): T {
   const clean = path.split('?')[0]
+  // 动态路径：会话消息回放
+  const messagesMatch = clean.match(/^\/api\/agent\/sessions\/([^/]+)\/messages$/)
+  if (messagesMatch) {
+    return {
+      session_id: messagesMatch[1],
+      messages: [
+        { role: 'user', content: '示例：你好', created_at: now() },
+        { role: 'assistant', content: '你好，我是离线 mock 助手。', created_at: now() },
+      ],
+    } as T
+  }
   let data: unknown
   switch (clean) {
     case '/health/liveness': data = { status: 'alive', service: 'plateau-dashboard', pid: 0 }; break
@@ -66,6 +155,26 @@ export function mockResponse<T>(path: string): T {
     case '/api/runtime/status': data = runtimeStatus(); break
     case '/api/runtime/services': data = services(); break
     case '/api/runtime/auth/login': data = { started: true, status: 'ready' } as AuthLoginResult; break
+    case '/api/plugins': data = plugins(); break
+    case '/api/plugins/registry': data = registry(); break
+    case '/api/model/providers': data = modelProviders(); break
+    case '/api/model/cb-openai/models': data = { object: 'list', data: [
+      { id: 'glm-4.6', object: 'model', owned_by: 'zhipu' },
+      { id: 'glm-4.5-air', object: 'model', owned_by: 'zhipu' },
+    ] }; break
+    case '/api/model/cb-openai/auth/login': data = { started: true, status: 'ready' } as AuthLoginResult; break
+    case '/api/agent/sessions': data = {
+      sessions: [
+        { session_id: 'mock-session-1', title: '示例对话', last_seq: 3, created_at: now(), updated_at: now() },
+      ],
+    }; break
+    case '/api/agent/files': data = {
+      file_id: 'mock-file',
+      name: 'upload.bin',
+      mime: 'application/octet-stream',
+      size: 0,
+      url: '/api/agent/files/mock-file',
+    }; break
     default: data = {}
   }
   return data as T

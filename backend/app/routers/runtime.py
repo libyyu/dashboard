@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """运行时聚合：把 launcher 注入的多服务状态收敛成前端单一契约。
 
-前端不直连 cb、不知道 cb 端口；这里由 PLATEAU_CB_HEALTH_URL 推导 origin，
+前端不直连 model provider、不知道其端口；这里由 provider 目录推导 base_url，
 避免浏览器跨域与端口硬编码，也符合「前后端通过契约解耦」。
 """
 from __future__ import annotations
@@ -9,18 +9,17 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import threading
 import urllib.request
 from pathlib import Path
 from typing import cast
-from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter
 from starlette.responses import JSONResponse
 
-from app.adapters.sqlite_storage import SqliteStorage
+from app.adapters.storage_factory import get_storage
 from app.core.errors import error_response
 from app.core.storage import DatabaseConfig
+from app.routers.model import _default_provider
 from app.runtime import log_policy, package_version, ports
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime"])
@@ -33,33 +32,6 @@ router = APIRouter(prefix="/api/runtime", tags=["runtime"])
 
 _CB_TIMEOUT = 2.0
 _LOGIN_TIMEOUT = 5.0
-_storage: SqliteStorage | None = None
-_storage_lock = threading.Lock()
-
-
-def _get_storage() -> SqliteStorage | None:
-    """按 DATABASE_URL 懒装配 SQLite 适配器；未配置返回 None（保持未迁移前的可运行性）。"""
-    global _storage
-    config = DatabaseConfig.from_env()
-    if not config.enabled:
-        return None
-    if config.dialect != "sqlite":
-        raise ValueError(f"当前只装配了 sqlite 适配器：{config.dialect}")
-    if _storage is None:
-        with _storage_lock:
-            if _storage is None:
-                _storage = SqliteStorage(config)
-    return _storage
-
-
-def _cb_origin() -> str:
-    raw = (os.environ.get("PLATEAU_CB_HEALTH_URL") or "").strip()
-    if not raw:
-        return ""
-    parts = urlsplit(raw)
-    if not parts.scheme or not parts.netloc:
-        return ""
-    return urlunsplit((parts.scheme, parts.netloc, "", "", ""))
 
 
 def _request_json(
@@ -101,17 +73,20 @@ def _read_services() -> list[dict[str, object]]:
 
 @router.get("/status")
 async def runtime_status() -> dict[str, object]:
-    origin = _cb_origin()
-    configured = bool(origin)
+    provider = _default_provider()
+    configured = provider is not None
+    provider_name = str(provider["name"]) if provider else None
     cb_health = None
     auth = None
-    if configured:
+    if provider is not None:
+        base_url = str(provider.get("base_url", "")).rstrip("/")
         cb_health = await asyncio.to_thread(
-            _request_json, f"{origin}/health", _CB_TIMEOUT
+            _request_json, f"{base_url}/health", _CB_TIMEOUT
         )
-        auth = await asyncio.to_thread(
-            _request_json, f"{origin}/auth/status", _CB_TIMEOUT
-        )
+        if provider.get("auth"):
+            auth = await asyncio.to_thread(
+                _request_json, f"{base_url}/auth/status", _CB_TIMEOUT
+            )
     if cb_health is not None:
         level, reason = "healthy", ""
     elif configured:
@@ -133,6 +108,7 @@ async def runtime_status() -> dict[str, object]:
             "health": cb_health,
             "auth": auth,
             "login_status": auth_status,
+            "provider": provider_name,
         },
         "logs_dir": str(log_policy.logs_dir()),
         "retention_days": log_policy.retention_days(),
@@ -166,7 +142,7 @@ async def runtime_storage() -> dict[str, object] | JSONResponse:
     if not DatabaseConfig.from_env().enabled:
         return error_response("NOT_CONFIGURED", 503, "数据库未配置（DATABASE_URL 为空）")
     try:
-        store = await asyncio.to_thread(_get_storage)
+        store = await asyncio.to_thread(get_storage)
         if store is None:
             return error_response("NOT_CONFIGURED", 503, "数据库未配置")
         health = await asyncio.to_thread(store.health)
@@ -177,12 +153,15 @@ async def runtime_storage() -> dict[str, object] | JSONResponse:
 
 @router.post("/auth/login", response_model=None)
 async def runtime_login() -> dict[str, object] | JSONResponse:
-    origin = _cb_origin()
-    if not origin:
-        return error_response("CB_UNAVAILABLE", 503, "cb 服务未配置")
+    provider = _default_provider()
+    if provider is None:
+        return error_response("CB_UNAVAILABLE", 503, "模型服务未配置")
+    if not provider.get("auth"):
+        return error_response("NOT_CONFIGURED", 404, "模型服务不提供 auth")
+    base_url = str(provider.get("base_url", "")).rstrip("/")
     result = await asyncio.to_thread(
-        _request_json, f"{origin}/auth/login", _LOGIN_TIMEOUT, method="POST"
+        _request_json, f"{base_url}/auth/login", _LOGIN_TIMEOUT, method="POST"
     )
     if result is None:
-        return error_response("CB_LOGIN_FAILED", 502, "cb 登录请求失败")
+        return error_response("CB_LOGIN_FAILED", 502, "模型服务登录失败")
     return result

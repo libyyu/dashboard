@@ -41,15 +41,16 @@ _CONTROL_EXACT = frozenset(
         "/health", "/health/liveness", "/health/ready", "/health/startup",
         "/api/ping", "/auth/status", "/auth/login",
         "/api/agent/models",
+        "/api/plugins/install", "/api/plugins/uninstall",
     }
 )
-_CONTROL_PREFIXES = ("/api/models", "/v1/models", "/auth/", "/api/runtime/auth/")
+_CONTROL_PREFIXES = ("/api/models", "/v1/models", "/auth/", "/api/runtime/auth/", "/api/model/")
 _CONTROL_SUFFIXES = ("/cancel", "/interrupt", "/tool-approval")
-_STREAM_MARKERS = ("/stream", "/sse", "/v1/chat/completions")
+_STREAM_MARKERS = ("/stream", "/sse", "/chat/completions")
 _BEST_EFFORT_CONTAINS = (
     "/observability", "/logs", "/transcript", "/assets", "/static",
     "/api/runtime/status", "/api/runtime/services", "/api/runtime/storage",
-    "/api/agent/sessions",
+    "/api/agent/sessions", "/api/plugins",
 )
 
 SHED_BODY = {
@@ -63,12 +64,13 @@ def classify_path(path: str, method: str = "GET") -> LaneDecision:
     p = path.split("?", 1)[0].rstrip("/") or "/"
     if p in _CONTROL_EXACT:
         return LaneDecision(Lane.CONTROL, "control_exact")
+    # 流式先于通用前缀：/api/model/{p}/chat/completions 要归 STREAM 而非 CONTROL
+    if any(x in p for x in _STREAM_MARKERS):
+        return LaneDecision(Lane.STREAM, "stream_marker")
     if any(p.startswith(x) for x in _CONTROL_PREFIXES):
         return LaneDecision(Lane.CONTROL, "control_prefix")
     if any(p.endswith(x) for x in _CONTROL_SUFFIXES):
         return LaneDecision(Lane.CONTROL, "control_suffix")
-    if any(x in p for x in _STREAM_MARKERS):
-        return LaneDecision(Lane.STREAM, "stream_marker")
     if any(x in p for x in _BEST_EFFORT_CONTAINS):
         return LaneDecision(Lane.BEST_EFFORT, "best_effort_marker")
     if p.startswith("/api/") or p.startswith("/v1/"):

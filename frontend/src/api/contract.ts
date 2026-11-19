@@ -1,6 +1,8 @@
 // 前端契约类型：只描述 HTTP/JSON 形状，不 import 任何后端代码。
 // 端点清单与车道以 contracts/api.json 为准，由 scripts/ci_cheap.py 守卫一致性。
 
+import type { AgentEvent } from '../types/chat'
+
 export const ENDPOINTS = {
   liveness: '/health/liveness',
   ready: '/health/ready',
@@ -12,12 +14,27 @@ export const ENDPOINTS = {
   runtimeServices: '/api/runtime/services',
   runtimeStorage: '/api/runtime/storage',
   runtimeLogin: '/api/runtime/auth/login',
-  agentModels: '/api/agent/models',
+  modelProviders: '/api/model/providers',
+  modelModels: '/api/model/{provider}/models',
+  modelModelDetail: '/api/model/{provider}/models/{model_id}',
+  modelChat: '/api/model/{provider}/chat/completions',
+  modelAuthStatus: '/api/model/{provider}/auth/status',
+  modelAuthLogin: '/api/model/{provider}/auth/login',
   agentRunStream: '/api/agent/runs/stream',
   agentCancel: '/api/agent/runs/{id}/cancel',
+  agentSessions: '/api/agent/sessions',
+  agentSession: '/api/agent/sessions/{id}',
+  agentSessionMessages: '/api/agent/sessions/{id}/messages',
   agentSessionEvents: '/api/agent/sessions/{id}/events',
+  agentFiles: '/api/agent/files',
+  agentFile: '/api/agent/files/{file_id}',
   graphNodes: '/api/graph/nodes',
   search: '/api/search',
+  plugins: '/api/plugins',
+  pluginsCapabilities: '/api/plugins/capabilities',
+  pluginsInstall: '/api/plugins/install',
+  pluginsUninstall: '/api/plugins/uninstall',
+  pluginsRegistry: '/api/plugins/registry',
 } as const
 
 export type HealthLevel = 'healthy' | 'degraded' | 'standalone' | 'unavailable'
@@ -95,6 +112,64 @@ export interface AuthLoginResult {
   error?: string
 }
 
+export interface PluginMenu {
+  title: string
+  path: string
+  group: string
+  icon?: string
+}
+
+export interface PluginRoute {
+  path: string
+  entry: string
+}
+
+export interface PluginInfo {
+  id: string
+  version: string
+  kind: 'frontend' | 'sidecar'
+  name?: string
+  requires: string[]
+  provides?: string
+  enabled: boolean
+  installed_at?: string
+  menu?: PluginMenu
+  routes?: PluginRoute[]
+}
+
+export interface PluginList {
+  plugins: PluginInfo[]
+}
+
+export interface RegistryPlugin {
+  id: string
+  name?: string
+  description?: string
+  kind?: 'frontend' | 'sidecar'
+  latest_version?: string
+  requires_core?: string
+  requires?: string[]
+  manifest_url?: string
+  [key: string]: unknown
+}
+
+export interface RegistryCatalog {
+  schema: number
+  plugins: RegistryPlugin[]
+  reachable?: boolean
+}
+
+export interface CapabilityInfo {
+  id: string
+  name: string
+  provider: string | null
+  satisfied: boolean
+}
+
+export interface CapabilityList {
+  capabilities: CapabilityInfo[]
+}
+
 export interface ApiErrorBody {
   code: string
   message: string
@@ -108,4 +183,10 @@ export interface HttpMeta {
   lane: string
   shed: boolean
   retryAfter: number
+}
+
+export interface AgentSessionEvents {
+  session_id: string
+  after_seq: number
+  events: AgentEvent[]
 }

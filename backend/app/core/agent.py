@@ -52,13 +52,26 @@ class AgentContext:
 
 @dataclass(frozen=True)
 class AgentEvent:
-    """统一的流式事件；前端只消费这一种形状，不依赖供应商协议。"""
+    """统一的流式事件；前端只消费这一种形状，不依赖供应商协议。
 
-    type: str  # message | delta | tool_call | tool_result | error | done
-    run_id: str
-    trace_id: str
+    type 由 provider 填，run_id/session_id/seq/trace_id/request_id 由编排层
+    （router）在发出前补全并持久化。seq 单调递增，SSE 帧用 id:{seq} 供断点续读。
+    """
+
+    type: str
+    run_id: str = ""
+    session_id: str = ""
+    seq: int = -1
+    trace_id: str = ""
     request_id: str = ""
     payload: dict[str, object] = field(default_factory=dict)
+
+
+# 契约 agent_event_shape.type 的唯一真源；provider 只产出这些 type。
+AGENT_EVENT_TYPES = frozenset({
+    "run_started", "thinking_delta", "message_delta", "tool_call", "tool_result",
+    "run_done", "error", "cancelled",
+})
 
 
 class ModelProvider(Protocol):
@@ -92,8 +105,22 @@ class SkillRegistry(Protocol):
 class SessionStore(Protocol):
     """会话事件持久化；实现必须走 core.storage.Storage，不直接写库。"""
 
-    def append_event(self, session_id: str, event: AgentEvent) -> None: ...
-    def read_events(self, session_id: str, limit: int = 200) -> Sequence[AgentEvent]: ...
+    def ensure_session(self, session_id: str, title: str = "") -> None: ...
+    def session_exists(self, session_id: str) -> bool: ...
+    def append_event(self, session_id: str, event: AgentEvent) -> AgentEvent: ...
+    def read_events(self, session_id: str, limit: int = 200,
+                    after_seq: int = -1) -> Sequence[AgentEvent]: ...
+    def last_seq(self, session_id: str) -> int: ...
+    def list_sessions(self, limit: int = 100,
+                      archived: bool | None = None) -> Sequence[dict[str, object]]: ...
+    def append_message(self, session_id: str, message: dict[str, object]) -> None: ...
+    def read_messages(self, session_id: str, limit: int = 500,
+                      before_seq: int = -1) -> Sequence[dict[str, object]]: ...
+    def rename_session(self, session_id: str, title: str) -> bool: ...
+    def delete_session(self, session_id: str) -> bool: ...
+    def delete_sessions(self, session_ids: list[str]) -> int: ...
+    def archive_session(self, session_id: str, archived: bool) -> bool: ...
+    def usage_stats(self, session_id: str | None = None) -> dict[str, object]: ...
 
 
 class Agent(Protocol):

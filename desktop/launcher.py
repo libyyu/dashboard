@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """桌面包 launcher：单 owner 管理多个 backend 服务。
 
-借鉴 EvoFlow 的 sidecar 编排思路，用 Python 实现以便与 FastAPI / cb 同语言：
+借鉴 EvoFlow 的 sidecar 编排思路，用 Python 实现以便与 FastAPI 同语言：
 
-- 服务清单来自 desktop/services.json（仅 dashboard backend 与 cb，不含 RuoYi 9099）
+- 服务清单来自 desktop/services.json（仅 dashboard backend，不含 RuoYi 9099）
 - 端口按 profile 哈希派生并持久化（复用 backend/app/runtime/ports.py）
 - 单 owner：launcher.lock + launcher.ready.json 双重判活，健康实例拒绝重复启动，stale 锁可接管
 - fail-open：可选服务拉起或探活失败不阻塞其它服务
@@ -53,7 +53,7 @@ def _base_dir() -> Path:
     """services.json 与相对 cwd 的基准目录。
 
     源码态 = desktop/；冻结态 = launcher.exe 所在目录（binaries/launcher/），
-    冻结版 services.json 与 dashboard/cb 相对路径都据此解析。
+    冻结版 services.json 与 dashboard 相对路径都据此解析。
     """
     if _is_frozen():
         return Path(sys.executable).resolve().parent
@@ -61,7 +61,7 @@ def _base_dir() -> Path:
 
 
 def _assembly_root() -> Path:
-    """冻结态 = binaries/（dashboard.exe、cb.exe 的父目录）；源码态 = 项目根。"""
+    """冻结态 = binaries/（dashboard.exe 的父目录）；源码态 = 项目根。"""
     if _is_frozen():
         return _base_dir().parent
     return _SOURCE_PROJECT
@@ -77,13 +77,6 @@ def _runtime_dir() -> Path:
         meipass = getattr(sys, "_MEIPASS", None)
         return (Path(meipass) if meipass else _base_dir()) / "runtime"
     return _SOURCE_BACKEND / "app" / "runtime"
-
-
-def _cb_home_default() -> Path:
-    """cb 源码/冻结目录；冻结态指向包内 binaries/cb，源码态指向开发机 cb 仓库。"""
-    if _is_frozen():
-        return _assembly_root() / "cb"
-    return _SOURCE_PROJECT.parent.parent / "RuoYi-Vue3-FastAPI" / "cb"
 
 
 ROOT = _base_dir()  # 向后兼容别名：services.json / 相对 cwd 基准
@@ -220,6 +213,72 @@ def _resolve_cwd(raw: str, ctx: dict[str, object]) -> Path:
     return path
 
 
+def _plugin_python(plugin_dir: Path) -> str:
+    """插件自带 venv 的 python；缺失时回退系统 python（源码态开发）。"""
+    rel = ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python"
+    venv = plugin_dir / rel
+    return str(venv) if venv.is_file() else "python"
+
+
+def _scan_sidecar_plugins(
+    plugins_root: Path,
+) -> tuple[list[Service], dict[str, dict[str, object]]]:
+    """扫描 profile/plugins/*/{version}/plugin.json，收集 kind=sidecar 且未禁用的插件。
+
+    返回 (服务清单, 占位符上下文)。合成服务名 plugin-<id>；manifest 未写 enabled=false
+    一律视为启用（当前无独立禁用态，安装即启用）。sidecar 一律 required=false（fail-open）。
+    """
+    services: list[Service] = []
+    ctx_by_name: dict[str, dict[str, object]] = {}
+    if not plugins_root.is_dir():
+        return services, ctx_by_name
+    for plugin_dir in sorted(plugins_root.iterdir()):
+        if not plugin_dir.is_dir():
+            continue
+        for version_dir in sorted(plugin_dir.iterdir()):
+            if not version_dir.is_dir():
+                continue
+            manifest = _read_json(version_dir / "plugin.json")
+            if manifest.get("kind") != "sidecar" or manifest.get("enabled") is False:
+                continue
+            service_block = manifest.get("service")
+            if not isinstance(service_block, dict):
+                continue
+            command = service_block.get("command")
+            if not isinstance(command, list) or not command:
+                continue
+            plugin_id = str(manifest.get("id") or plugin_dir.name)
+            name = f"plugin-{plugin_id}"
+            health = service_block.get("health_path")
+            ready = service_block.get("ready_path")
+            resolved = version_dir.resolve()
+            services.append({
+                "name": name,
+                "command": [str(part) for part in command],
+                "cwd": str(service_block.get("cwd") or ""),
+                "health_path": str(health) if health else None,
+                "ready_path": str(ready) if ready else None,
+                "required": bool(service_block.get("required", False)),
+            })
+            ctx_by_name[name] = {
+                "plugin_dir": str(resolved),
+                "config_dir": str((plugins_root / plugin_id / "config").resolve()),
+                "python": _plugin_python(resolved),
+            }
+    return services, ctx_by_name
+
+
+def _service_ctx(
+    name: str,
+    port_map: dict[str, int],
+    plugin_ctx_by_name: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    """构造单个服务的占位符上下文（sidecar 插件额外带 plugin_dir/config_dir/python）。"""
+    ctx: dict[str, object] = {"port": port_map[name]}
+    ctx.update(plugin_ctx_by_name.get(name, {}))
+    return ctx
+
+
 def _pid_alive(pid: int) -> bool:
     """只读地探测进程是否存活。
 
@@ -340,7 +399,7 @@ def _shutdown() -> None:
 def _decode_output(raw: bytes) -> str:
     """子进程 stdout 编码不统一，逐行归一成 UTF-8。
 
-    PYTHONIOENCODING / PYTHONUTF8 只管得到 Python 进程；cb 拉起的外部 CLI / Node
+    PYTHONIOENCODING / PYTHONUTF8 只管得到 Python 进程；外部 CLI / Node
     子进程在 Windows 上仍按系统 ANSI（GBK）写管道。若一律 utf-8 + replace，
     一个 GBK 汉字会变成两个 U+FFFD，日志页就是成串的菱形乱码（RAW 行）。
     逐行先按 UTF-8 strict 解，失败再回退系统 ANSI；仍然失败才 replace。
@@ -419,19 +478,16 @@ def main() -> int:
         list[Service],
         json.loads((ROOT / "services.json").read_text(encoding="utf-8"))["services"],
     )
+    plugins_root = home / "profiles" / profile / "plugins"
+    sidecars, plugin_ctx_by_name = _scan_sidecar_plugins(plugins_root)
+    services = services + sidecars
     if only:
         services = [svc for svc in services if svc["name"] == only]
 
-    cb_home = Path(os.environ.get("PLATEAU_CB_HOME") or str(_cb_home_default()))
-    cb_config_dir = home / "profiles" / profile / "cb-config"
-
-    # 先统一分配端口，构造共享环境（dashboard 的 ready 会检查 cb 是否可达）
+    # 先统一分配端口，构造共享环境
     port_map: dict[str, int] = {}
     for svc in services:
         name = svc["name"]
-        if name == "cb" and not cb_home.is_dir():
-            print(f"[WARN] 跳过 cb：{cb_home} 不存在（可设 PLATEAU_CB_HOME）")
-            continue
         port_map[name] = (
             ports.stable_port(f"{profile}:{name}")
             if dry_run
@@ -446,40 +502,24 @@ def main() -> int:
     # 数据层：SQLite 落在 profile 目录（安装目录之外，自动更新覆盖不会丢数据）
     db_path = (home / "profiles" / profile / "plateau.db").as_posix()
     shared_env["DATABASE_URL"] = f"sqlite:///{db_path}"
+    # 插件 registry：默认本机 8700，部署后由外部环境覆盖指向 devcloud
+    shared_env["PLATEAU_REGISTRY_URL"] = os.environ.get("PLATEAU_REGISTRY_URL", "http://127.0.0.1:8700")
     # 子进程 stdout 统一 utf-8：Windows 默认用 GBK 写管道，读取端按 utf-8 解会乱码
     shared_env["PYTHONIOENCODING"] = "utf-8"
     shared_env["PYTHONUTF8"] = "1"
     shared_env["PORT"] = str(port_map.get("dashboard", ports.BASE_PORT))
-    if "cb" in port_map:
-        shared_env["PLATEAU_CB_HEALTH_URL"] = f"http://127.0.0.1:{port_map['cb']}/health"
-        # 冻结态：SDK CLI 随包放在 cb/bin/，显式注入让 cb 的 _detect_cli 环境变量优先
-        # 命中（目标机无开发机写死路径）。源码态该文件不存在，不注入，cb 自行探测。
-        cli = _assembly_root() / "cb" / "bin" / "codebuddy-headless.exe"
-        if cli.is_file():
-            shared_env["CODEBUDDY_CODE_PATH"] = str(cli)
-        elif _is_frozen():
-            _console(
-                "sdk_cli.missing",
-                f"[WARN] 冻结包缺少随包 SDK CLI：{cli}（cb 的 CLI 能力不可用）",
-                logging.WARNING, path=str(cli),
-            )
-    else:
-        _ = shared_env.pop("PLATEAU_CB_HEALTH_URL", None)
-        _ = shared_env.pop("CODEBUDDY_CODE_PATH", None)
 
     if dry_run:
         for svc in services:
             name = svc["name"]
             if name not in port_map:
                 continue
-            dry_ctx: dict[str, object] = {
-                "port": port_map[name], "cb_home": cb_home, "cb_config_dir": cb_config_dir,
-            }
+            dry_ctx = _service_ctx(name, port_map, plugin_ctx_by_name)
             cwd = _resolve_cwd(svc["cwd"], dry_ctx)
             cmd = _expand_command(svc["command"], dry_ctx)
             print(f"[DRY] {name}: port={port_map[name]} cwd={cwd} cmd={cmd}")
         print(f"[DRY] profile={profile} home={home} logs={logs_root} "
-              f"cb_health={shared_env.get('PLATEAU_CB_HEALTH_URL')}")
+              f"sidecars={sorted(plugin_ctx_by_name)}")
         return 0
 
     _ = atexit.register(_shutdown)
@@ -525,11 +565,9 @@ def main() -> int:
         name = svc["name"]
         if name not in port_map:
             continue
-        ctx: dict[str, object] = {
-            "port": port_map[name], "cb_home": cb_home, "cb_config_dir": cb_config_dir,
-        }
-        if name == "cb":
-            cb_config_dir.mkdir(parents=True, exist_ok=True)
+        ctx = _service_ctx(name, port_map, plugin_ctx_by_name)
+        if "config_dir" in ctx:
+            Path(str(ctx["config_dir"])).mkdir(parents=True, exist_ok=True)
         command = _expand_command(svc["command"], ctx)
         cwd = _resolve_cwd(svc["cwd"], ctx)
         # Windows：CreateProcess 不把 cwd 当搜索目录（lpApplicationName 相对时只搜

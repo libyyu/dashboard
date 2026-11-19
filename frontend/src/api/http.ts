@@ -6,9 +6,9 @@
 import type { ApiErrorBody, HttpMeta } from './contract'
 import { mockResponse } from './mock'
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+export const BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
 const DEFAULT_TIMEOUT = Number(import.meta.env.VITE_API_TIMEOUT_MS ?? 15000)
-const MOCK = import.meta.env.VITE_API_MOCK === '1'
+export const MOCK = import.meta.env.VITE_API_MOCK === '1'
 
 export interface ApiErrorOptions {
   code: string
@@ -54,7 +54,7 @@ export function getLastRequestId(): string {
   return lastMeta.requestId
 }
 
-function newRequestId(): string {
+export function newRequestId(): string {
   try {
     return crypto.randomUUID().replace(/-/g, '').slice(0, 16)
   } catch {

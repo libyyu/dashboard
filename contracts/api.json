@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "1.0.1",
+  "version": "1.0.15",
   "note": "前后端契约单一真源。前后端各自独立验证：前端 VITE_API_MOCK=1 离线跑 + npm run build；后端 python scripts/ci_cheap.py 静态守卫。任一侧不得 import 对方代码。",
   "base_url": "/",
   "headers": {
@@ -22,14 +22,32 @@
       "request_id": "string?"
     }
   },
+  "agent_event_shape": {
+    "type": "run_started | thinking_delta | message_delta | tool_call | tool_result | run_done | error | cancelled",
+    "seq": "int",
+    "run_id": "string",
+    "session_id": "string",
+    "trace_id": "string",
+    "request_id": "string?",
+    "payload": "object"
+  },
   "error_codes": [
     "GATEWAY_OVERLOAD_SHED",
     "INTERNAL_ERROR",
     "INVALID_SOURCE",
-    "CB_UNAVAILABLE",
-    "CB_LOGIN_FAILED",
+    "PROVIDER_UNAVAILABLE",
+    "PROVIDER_AUTH_FAILED",
+    "PROVIDER_AUTH_REQUIRED",
     "NOT_CONFIGURED",
-    "REQUEST_TIMEOUT"
+    "PLUGIN_NOT_FOUND",
+    "PLUGIN_CHECKSUM_MISMATCH",
+    "PLUGIN_CAPABILITY_UNSATISFIED",
+    "REQUEST_TIMEOUT",
+    "AGENT_NOT_READY",
+    "AGENT_RUN_NOT_FOUND",
+    "AGENT_SESSION_NOT_FOUND",
+    "FILE_NOT_FOUND",
+    "FILE_TOO_LARGE"
   ],
   "endpoints": [
     {
@@ -110,36 +128,124 @@
       "notes": "控制类，永不 shed"
     },
     {
-      "path": "/api/agent/models",
+      "path": "/api/model/providers",
       "method": "GET",
       "lane": "control",
-      "implemented": false,
+      "implemented": true,
+      "response": "ModelProviderList",
+      "notes": "model provider 目录 + default；来源 = 注册表 KV（model_providers 集合）∪ 插件扫描（provides=model 的 sidecar，manifest model 块声明协议/登录）；响应不含 api_key"
+    },
+    {
+      "path": "/api/model/{provider}/models",
+      "method": "GET",
+      "lane": "control",
+      "implemented": true,
       "response": "ModelList",
-      "notes": "ModelProvider.list_models"
+      "notes": "OpenAI 兼容 /v1/models 透传"
+    },
+    {
+      "path": "/api/model/{provider}/models/{model_id}",
+      "method": "GET",
+      "lane": "control",
+      "implemented": true,
+      "response": "ModelDetail",
+      "notes": "OpenAI 兼容 /v1/models/{id} 透传"
+    },
+    {
+      "path": "/api/model/{provider}/chat/completions",
+      "method": "POST",
+      "lane": "stream",
+      "implemented": true,
+      "response": "SSE",
+      "notes": "OpenAI 兼容 /v1/chat/completions SSE 透传"
+    },
+    {
+      "path": "/api/model/{provider}/auth/status",
+      "method": "GET",
+      "lane": "control",
+      "implemented": true,
+      "response": "AuthStatus",
+      "notes": "仅 auth=true 的 provider"
+    },
+    {
+      "path": "/api/model/{provider}/auth/login",
+      "method": "POST",
+      "lane": "control",
+      "implemented": true,
+      "response": "AuthLogin|502",
+      "notes": "仅 auth=true 的 provider；控制类永不 shed"
     },
     {
       "path": "/api/agent/runs/stream",
       "method": "POST",
       "lane": "stream",
-      "implemented": false,
+      "implemented": true,
       "response": "SSE<AgentEvent>",
-      "notes": "不占 REST inflight，永不 shed"
+      "notes": "不占 REST inflight，永不 shed；SSE 帧带 id:{seq}，回放支持 Last-Event-ID"
     },
     {
       "path": "/api/agent/runs/{id}/cancel",
       "method": "POST",
       "lane": "control",
-      "implemented": false,
+      "implemented": true,
       "response": "CancelResult",
-      "notes": "取消永不 shed"
+      "notes": "取消永不 shed；协作式：置取消标记 + 写终态，上游连接由内核断开"
     },
     {
       "path": "/api/agent/sessions/{id}/events",
       "method": "GET",
       "lane": "best_effort",
-      "implemented": false,
+      "implemented": true,
       "response": "AgentEvent[]",
-      "notes": "SessionStore.read_events"
+      "notes": "SessionStore.read_events；支持 after_seq 增量续读 + Last-Event-ID"
+    },
+    {
+      "path": "/api/agent/sessions",
+      "method": "GET",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "AgentSessionList",
+      "notes": "会话元信息列表（最近更新优先，不含事件/消息体）"
+    },
+    {
+      "path": "/api/agent/sessions/{id}/messages",
+      "method": "GET",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "AgentSessionMessages",
+      "notes": "会话消息回放（user/assistant 完整对话，供刷新后恢复）"
+    },
+    {
+      "path": "/api/agent/sessions/{id}",
+      "method": "PATCH",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "SessionRename",
+      "notes": "重命名会话标题（body：{title}）"
+    },
+    {
+      "path": "/api/agent/sessions/{id}",
+      "method": "DELETE",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "SessionDelete",
+      "notes": "删除会话及其事件/消息"
+    },
+    {
+      "path": "/api/agent/files",
+      "method": "POST",
+      "lane": "data",
+      "implemented": true,
+      "response": "UploadedFile",
+      "notes": "聊天附件上传（JSON base64），返回 file_id/url"
+    },
+    {
+      "path": "/api/agent/files/{file_id}",
+      "method": "GET",
+      "lane": "data",
+      "implemented": true,
+      "response": "FileResponse",
+      "notes": "下载已上传附件"
     },
     {
       "path": "/api/graph/nodes",
@@ -154,6 +260,46 @@
       "lane": "data",
       "implemented": false,
       "response": "SearchResults"
+    },
+    {
+      "path": "/api/plugins",
+      "method": "GET",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "PluginList",
+      "notes": "本机已装插件清单（读 SQLite plugins collection）"
+    },
+    {
+      "path": "/api/plugins/capabilities",
+      "method": "GET",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "CapabilityList",
+      "notes": "内核能力清单 + 各自 provider 状态"
+    },
+    {
+      "path": "/api/plugins/install",
+      "method": "POST",
+      "lane": "control",
+      "implemented": true,
+      "response": "PluginInstallResult",
+      "notes": "拉 catalog → 下载 → sha256 校验 → 落盘 → 写 SQLite；控制类永不 shed"
+    },
+    {
+      "path": "/api/plugins/uninstall",
+      "method": "POST",
+      "lane": "control",
+      "implemented": true,
+      "response": "PluginUninstallResult",
+      "notes": "停 sidecar → 删包体 → 删 SQLite"
+    },
+    {
+      "path": "/api/plugins/registry",
+      "method": "GET",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "RegistryCatalog",
+      "notes": "透传 registry catalog.json（供前端可安装列表）"
     }
   ],
   "architecture": {
@@ -184,8 +330,21 @@
     },
     "agent": {
       "port": "app.core.agent",
-      "provider": "cb-openai",
-      "enabled": false,
+      "provider": "registry",
+      "provider_sources": [
+        "registry-kv",
+        "sidecar-scan"
+      ],
+      "api_types": [
+        "agent-events",
+        "openai-completions"
+      ],
+      "auth_modes": [
+        "api-key",
+        "login",
+        "none"
+      ],
+      "enabled": true,
       "extensions": [
         "mcp",
         "skill",

@@ -1,11 +1,98 @@
 :root {
-  --pd-bg: #f6f7fb;
-  --pd-sidebar: #1e2533;
-  --pd-sidebar-active: #2c3649;
-  --pd-border: #e6e9f0;
-  --pd-text: #1c2333;
-  --pd-muted: #7b8496;
-  --pd-primary: #4a5bd0;
+  color-scheme: light;
+
+  /* —— 表面与中性（暖纸底，非纯白 / 非纯灰） —— */
+  --pd-paper: oklch(97.2% 0.007 82);
+  --pd-paper-2: oklch(93.5% 0.011 82);
+  --pd-surface: oklch(99.2% 0.004 82);
+  --pd-surface-2: oklch(96% 0.008 82);
+
+  /* —— 墨色（深色带轻微冷偏） —— */
+  --pd-text: oklch(23.5% 0.022 262);
+  --pd-text-2: oklch(42% 0.02 262);
+  --pd-muted: oklch(52% 0.02 262);
+  --pd-faint: oklch(63% 0.015 262);
+  --pd-border: oklch(88% 0.01 82);
+  --pd-border-strong: oklch(79% 0.012 82);
+
+  /* —— 强调：测量朱红（rare, powerful） —— */
+  --pd-primary: oklch(55% 0.18 30);
+  --pd-primary-strong: oklch(42% 0.15 30);
+  --pd-primary-soft: oklch(93% 0.045 30);
+  --pd-primary-ring: oklch(55% 0.18 30 / 0.16);
+
+  /* —— 地形青（装饰 / 次要信息） —— */
+  --pd-terrain: oklch(52% 0.09 190);
+  --pd-terrain-soft: oklch(91% 0.032 190);
+
+  --pd-danger: oklch(52% 0.17 28);
+  --pd-success: oklch(52% 0.11 155);
+  --pd-warning: oklch(62% 0.14 70);
+
+  /* —— 侧边栏（浅色暖纸，与内容区同源） —— */
+  --pd-sidebar: oklch(97.2% 0.007 82);
+  --pd-sidebar-2: oklch(93.5% 0.011 82);
+  --pd-sidebar-active: oklch(93% 0.045 30);
+  --pd-sidebar-text: oklch(42% 0.02 262);
+  --pd-sidebar-heading: oklch(52% 0.02 262);
+
+  --pd-bg: var(--pd-paper);
+
+  /* —— 形状 —— */
+  --pd-radius-sm: 6px;
+  --pd-radius: 8px;
+  --pd-radius-lg: 12px;
+
+  /* —— 阴影（柔和） —— */
+  --pd-shadow-sm: 0 1px 2px oklch(20% 0.02 262 / 0.05), 0 8px 24px oklch(20% 0.02 262 / 0.05);
+  --pd-shadow-md: 0 8px 24px oklch(20% 0.02 262 / 0.08);
+  --pd-shadow-lg: 0 20px 50px -20px oklch(20% 0.02 262 / 0.16);
+
+  --pd-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --pd-font: "Outfit", system-ui, -apple-system, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC",
+    "Microsoft YaHei", sans-serif;
+  --pd-font-display: "Fraunces", Georgia, "Times New Roman", "Songti SC", serif;
+  --pd-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* —— Element Plus 主题变量覆盖（全局生效） —— */
+:root {
+  --el-color-primary: var(--pd-primary);
+  --el-color-primary-light-3: oklch(68% 0.14 30);
+  --el-color-primary-light-5: oklch(78% 0.09 30);
+  --el-color-primary-light-7: oklch(88% 0.05 30);
+  --el-color-primary-light-8: oklch(92% 0.035 30);
+  --el-color-primary-light-9: oklch(95% 0.02 30);
+  --el-color-primary-dark-2: var(--pd-primary-strong);
+
+  --el-color-success: var(--pd-success);
+  --el-color-warning: var(--pd-warning);
+  --el-color-danger: var(--pd-danger);
+
+  --el-text-color-primary: var(--pd-text);
+  --el-text-color-regular: var(--pd-text-2);
+  --el-text-color-secondary: var(--pd-muted);
+  --el-text-color-placeholder: var(--pd-faint);
+
+  --el-border-color: var(--pd-border);
+  --el-border-color-light: var(--pd-border);
+  --el-border-color-lighter: var(--pd-border);
+  --el-border-color-extra-light: var(--pd-border);
+
+  --el-fill-color: var(--pd-surface-2);
+  --el-fill-color-light: var(--pd-surface-2);
+  --el-fill-color-lighter: var(--pd-surface-2);
+  --el-fill-color-blank: var(--pd-surface);
+
+  --el-bg-color: var(--pd-surface);
+  --el-bg-color-page: var(--pd-paper);
+
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: 999px;
+
+  --el-font-family: var(--pd-font);
 }
 
 * { box-sizing: border-box; }
@@ -16,16 +103,33 @@ html, body, #app {
 }
 
 body {
-  background: var(--pd-bg);
+  background: var(--pd-paper);
   color: var(--pd-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--pd-font);
   font-size: 14px;
   line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-a { color: var(--pd-primary); }
+a { color: var(--pd-primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-/* 摘要卡片 */
+::selection { background: var(--pd-primary-ring); }
+
+/* 细滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: oklch(79% 0.012 82);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: oklch(70% 0.012 82); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* —— 通用组件 —— */
 .pd-cards {
   display: flex;
   gap: 12px;
@@ -33,34 +137,104 @@ a { color: var(--pd-primary); }
   margin: 16px 0;
 }
 .pd-card {
-  background: #fff;
+  background: var(--pd-surface);
   border: 1px solid var(--pd-border);
-  border-radius: 12px;
-  padding: 14px 18px;
+  border-radius: var(--pd-radius-lg);
+  padding: 16px 18px;
   min-width: 126px;
   flex: 1;
   cursor: pointer;
-  transition: border-color .15s, box-shadow .15s;
+  transition: border-color 0.2s var(--pd-ease), box-shadow 0.2s var(--pd-ease),
+    transform 0.2s var(--pd-ease);
 }
-.pd-card:hover { border-color: #c9d0f5; }
-.pd-card.on { border-color: var(--pd-primary); box-shadow: 0 0 0 2px rgba(74, 91, 208, .12); }
-.pd-card .v { font-size: 26px; font-weight: 680; line-height: 1.2; }
-.pd-card .l { color: var(--pd-muted); font-size: 12px; margin-top: 3px; }
-.pd-card.warn .v { color: #d9483b; }
+.pd-card:hover {
+  border-color: var(--pd-border-strong);
+  box-shadow: var(--pd-shadow-sm);
+  transform: translateY(-2px);
+}
+.pd-card.on {
+  border-color: var(--pd-primary);
+  box-shadow: 0 0 0 3px var(--pd-primary-ring);
+}
+.pd-card .v { font-size: 28px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; }
+.pd-card .l {
+  font-family: var(--pd-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--pd-muted);
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+.pd-card.warn .v { color: var(--pd-danger); }
 
 .pd-panel {
-  background: #fff;
+  background: var(--pd-surface);
   border: 1px solid var(--pd-border);
-  border-radius: 12px;
-  padding: 18px 20px;
+  border-radius: var(--pd-radius-lg);
+  padding: 20px 22px;
   margin-bottom: 16px;
+  box-shadow: var(--pd-shadow-sm);
 }
-.pd-panel h2 { font-size: 15px; margin: 0 0 12px; font-weight: 640; }
+.pd-panel h2 { font-family: var(--pd-font-display); font-size: 19px; margin: 0 0 14px; font-weight: 600; letter-spacing: -0.01em; }
 .pd-hint { color: var(--pd-muted); font-size: 12px; font-weight: 400; }
-.pd-muted { color: #a4acbd; }
-.pd-od { color: #d9483b; font-weight: 600; }
-.pd-sub { color: #98a0b0; font-size: 11px; margin-top: 2px; }
-.pd-fulltitle { font-size: 12px; color: var(--pd-muted); margin-top: 9px; word-break: break-all; }
+.pd-muted { color: var(--pd-faint); }
+.pd-od { color: var(--pd-danger); font-weight: 600; }
+.pd-sub { color: var(--pd-faint); font-size: 11px; margin-top: 2px; }
+.pd-fulltitle { font-family: var(--pd-mono); font-size: 11px; color: var(--pd-muted); margin-top: 9px; word-break: break-all; }
 .pd-kv { font-size: 13px; line-height: 1.9; }
 .pd-kv b { color: var(--pd-text); }
 .pd-note { color: var(--pd-muted); font-size: 12px; line-height: 1.85; }
+
+/* —— 深色主题 —— */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --pd-paper: oklch(16% 0.013 262);
+  --pd-paper-2: oklch(19% 0.013 262);
+  --pd-surface: oklch(21.5% 0.013 262);
+  --pd-surface-2: oklch(18% 0.012 262);
+  --pd-text: oklch(93% 0.007 82);
+  --pd-text-2: oklch(73% 0.012 262);
+  --pd-muted: oklch(63% 0.013 262);
+  --pd-faint: oklch(52% 0.013 262);
+  --pd-border: oklch(28% 0.013 262);
+  --pd-border-strong: oklch(35% 0.013 262);
+  --pd-primary: oklch(66% 0.16 30);
+  --pd-primary-strong: oklch(74% 0.15 30);
+  --pd-primary-soft: oklch(29% 0.055 30);
+  --pd-primary-ring: oklch(66% 0.16 30 / 0.22);
+  --pd-terrain: oklch(66% 0.085 190);
+  --pd-terrain-soft: oklch(25% 0.032 190);
+  --pd-danger: oklch(64% 0.15 28);
+  --pd-success: oklch(64% 0.11 155);
+  --pd-warning: oklch(70% 0.13 70);
+  --pd-sidebar: oklch(16% 0.013 262);
+  --pd-sidebar-2: oklch(19% 0.013 262);
+  --pd-sidebar-active: oklch(29% 0.055 30);
+  --pd-sidebar-text: oklch(73% 0.012 262);
+  --pd-sidebar-heading: oklch(56% 0.013 262);
+  --pd-shadow-sm: 0 1px 2px oklch(8% 0.01 262 / 0.5), 0 12px 32px oklch(8% 0.01 262 / 0.45);
+  --pd-shadow-md: 0 12px 32px oklch(8% 0.01 262 / 0.5);
+  --pd-shadow-lg: 0 24px 56px -20px oklch(8% 0.01 262 / 0.6);
+
+  --el-color-primary: var(--pd-primary);
+  --el-color-primary-light-3: oklch(62% 0.14 30);
+  --el-color-primary-light-5: oklch(52% 0.11 30);
+  --el-color-primary-light-7: oklch(42% 0.08 30);
+  --el-color-primary-light-8: oklch(36% 0.06 30);
+  --el-color-primary-light-9: oklch(30% 0.05 30);
+  --el-color-primary-dark-2: oklch(74% 0.15 30);
+  --el-text-color-primary: var(--pd-text);
+  --el-text-color-regular: var(--pd-text-2);
+  --el-text-color-secondary: var(--pd-muted);
+  --el-text-color-placeholder: var(--pd-faint);
+  --el-border-color: var(--pd-border);
+  --el-border-color-light: var(--pd-border);
+  --el-border-color-lighter: var(--pd-border);
+  --el-border-color-extra-light: var(--pd-border);
+  --el-fill-color: var(--pd-surface-2);
+  --el-fill-color-light: var(--pd-surface-2);
+  --el-fill-color-lighter: var(--pd-surface-2);
+  --el-fill-color-blank: var(--pd-surface);
+  --el-bg-color: var(--pd-surface);
+  --el-bg-color-page: var(--pd-paper);
+}

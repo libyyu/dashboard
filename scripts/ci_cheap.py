@@ -76,11 +76,12 @@ def main() -> int:
     sample = ports.stable_port("default:dashboard")
     check("端口落在 8100..8999", ports.BASE_PORT <= sample <= ports.BASE_PORT + ports.PORT_RANGE - 1, str(sample))
     check("端口派生稳定", ports.stable_port("default:dashboard") == sample)
-    check("不同服务端口不同", ports.stable_port("default:dashboard") != ports.stable_port("default:cb"))
+    check("不同服务端口不同", ports.stable_port("default:dashboard") != ports.stable_port("default:plugin-cb-openai"))
 
     services = services_doc["services"]
     names = sorted(s["name"] for s in services)
-    check("服务清单仅 dashboard + cb", names == ["cb", "dashboard"], str(names))
+    check("服务清单仅 dashboard", names == ["dashboard"], str(names))
+    check("服务清单不含 cb（已外置）", "cb" not in names)
     # 只检查服务配置本身，说明文字里提到「不含 9099」不算命中
     spec_text = json.dumps(services, ensure_ascii=False).lower()
     check("服务配置不含 9099 / RuoYi 后端", "9099" not in spec_text and "ruoyi" not in spec_text)
@@ -133,6 +134,9 @@ def main() -> int:
         ROOT / "backend" / "app" / "runtime" / "health.py",
         ROOT / "backend" / "app" / "runtime" / "log_routes.py",
         ROOT / "backend" / "app" / "routers" / "runtime.py",
+        ROOT / "backend" / "app" / "routers" / "plugins.py",
+        ROOT / "backend" / "app" / "routers" / "model.py",
+        ROOT / "backend" / "app" / "routers" / "agent.py",
     )
     backend_src = "\n".join(
         path.read_text(encoding="utf-8") for path in backend_files if path.is_file()
@@ -215,6 +219,7 @@ def main() -> int:
     check("运行时聚合不硬编码 desktop 路径",
           "PLATEAU_SERVICES_JSON" in runtime_router_src and "parents[3]" not in runtime_router_src)
     check("launcher 注入服务清单环境变量", "PLATEAU_SERVICES_JSON" in launcher_src)
+    check("launcher 注入插件 registry 地址", "PLATEAU_REGISTRY_URL" in launcher_src)
     check("launcher stdout 走 utf-8 且写前脱敏",
           "PYTHONIOENCODING" in launcher_src and "redact_text" in launcher_src)
 
@@ -227,13 +232,14 @@ def main() -> int:
     check("数据库走 DATABASE_URL 且不硬编码驱动",
           "DATABASE_URL" in core_src and "import sqlite3" not in core_src
           and "import sqlalchemy" not in core_src and "import psycopg" not in core_src)
-    check("Agent 端口仅定义契约（尚无实现，不代表可用）",
+    check("Agent 端口与统一事件类型齐备",
           all(name in agent_src for name in (
               "ModelProvider", "ToolRegistry", "SkillRegistry", "SessionStore",
               "Orchestrator", "AgentEvent", "MCPToolAdapter", "CBOpenAIProvider",
-          )) and contract["architecture"]["agent"]["enabled"] is False)
-    check("契约 agent 开关与「尚无实现」一致",
-          contract["architecture"]["agent"]["enabled"] is False)
+              "AGENT_EVENT_TYPES",
+          )))
+    check("契约 agent 开关开启",
+          contract["architecture"]["agent"]["enabled"] is True)
 
     # 数据层：core 仍是纯端口，DDL 与驱动只在 adapters；契约开关与装配层一致。
     router_src = (ROOT / "backend" / "app" / "routers" / "runtime.py").read_text(encoding="utf-8")
@@ -241,10 +247,12 @@ def main() -> int:
     adapter_src = "\n".join(
         path.read_text(encoding="utf-8") for path in sorted(adapter_dir.glob("*.py"))
     )
+    check("Agent 适配器实现存在",
+          "class CBOpenAIProvider" in adapter_src and "class SqliteSessionStore" in adapter_src)
     check("契约 database 开关与 adapter 一致",
           contract["architecture"]["database"]["enabled"] is True
           and "class SqliteStorage" in adapter_src
-          and "SqliteStorage" in router_src)
+          and "get_storage" in router_src)
     check("launcher 注入 DATABASE_URL", "DATABASE_URL" in launcher_src)
     check("迁移 DDL 集中在 adapters",
           "CREATE TABLE" in adapter_src and "CREATE TABLE" not in router_src)
@@ -256,6 +264,8 @@ def main() -> int:
     # 更新通道不变量：公钥必须是真值；http 端点只允许 loopback，
     # 防止 dangerousInsecureTransportProtocol 被带到公网部署。
     tauri_cfg = json.loads((ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+    resources = [str(r) for r in tauri_cfg.get("bundle", {}).get("resources", [])]
+    check("tauri resources 不含 cb（已外置）", "cb" not in " ".join(resources).lower(), str(resources))
     updater_cfg = tauri_cfg.get("plugins", {}).get("updater", {})
     pubkey = str(updater_cfg.get("pubkey", ""))
     endpoints = [str(u) for u in updater_cfg.get("endpoints", [])]
