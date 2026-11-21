@@ -10,8 +10,9 @@
   自动下载，不再探测宿主 WorkBuddy/CodeBuddy IDE）
 - CLI 入口来自插件目录 plugins/codebuddy-cli/{version}/cli/（ESM 脚本优先）
 - 拼命令：--print --output-format stream-json --permission-mode dontAsk
-  --strict-mcp-config --mcp-config {} --no-session-persistence --max-turns 1
-- 对话历史渲染成文本 transcript 经 stdin 传入（单次无状态问答，Agent 工具循环留待后续）
+  --strict-mcp-config --mcp-config {} --no-session-persistence --max-turns 6
+- 对话历史渲染成文本 transcript 经 stdin 传入（单次无状态问答，Agent 工具循环留待后续）；
+  带图片附件时改走 --input-format stream-json，图片以 image block 随 transcript 传入
 - 逐行解析 stream-json（system/init、assistant(text/thinking/tool_use)、
   user(tool_result)、result、error）→ AgentEvent
 
@@ -213,6 +214,35 @@ def _content_text(content: object) -> str:
     return ""
 
 
+def _image_blocks(messages: list[dict[str, object]]) -> list[dict[str, object]]:
+    """收集消息里的图片（OpenAI image_url dataUrl）→ CLI stream-json 的 image block。
+
+    只支持 dataUrl（前端图片附件产生的就是它）；http(s) URL 无法确定媒体类型，跳过。
+    """
+    blocks: list[dict[str, object]] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") != "image_url":
+                continue
+            image_url = part.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else ""
+            url = str(url or "")
+            if not url.startswith("data:"):
+                continue
+            head, _, data = url.partition(",")
+            mime = head[5:].split(";", 1)[0] or "image/png"
+            if not data:
+                continue
+            blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": mime, "data": data},
+            })
+    return blocks
+
+
 def _block_type(block: object) -> str:
     return str(block.get("type") or "") if isinstance(block, dict) else ""
 
@@ -411,7 +441,9 @@ def _is_auth_required(text: str) -> bool:
 class CodeBuddyCliProvider:
     """把本机 CodeBuddy CLI 的 stream-json 流解析成 AgentEvent 序列（同步生成器）。"""
 
-    def __init__(self, *, cwd: str = "", tools: tuple[str, ...] = (), max_turns: int = 1) -> None:
+    # 之前默认 1：模型任何一次工具调用（如 WebSearch）就会耗尽轮次，CLI 直接报
+    # "Max turns (1) exceeded"，带工具的提问必挂。给足工具循环空间。
+    def __init__(self, *, cwd: str = "", tools: tuple[str, ...] = (), max_turns: int = 6) -> None:
         self.cwd = cwd or ""
         self.tools = tools
         self.max_turns = max_turns
@@ -447,7 +479,18 @@ class CodeBuddyCliProvider:
             })
             return
 
-        command = self._build_command(node, cli, model, reasoning_effort)
+        images = _image_blocks(messages)
+        if images:
+            # 带图对话：CLI 的纯文本 stdin 不支持图片，改走 stream-json 输入，
+            # 图片块置于 transcript 文本之前（实测 deepseek-v4.1-flash 可正确识图）。
+            stdin_text = json.dumps({
+                "type": "user",
+                "message": {"role": "user", "content": [*images, {"type": "text", "text": prompt}]},
+            }, ensure_ascii=False) + "\n"
+        else:
+            stdin_text = prompt
+
+        command = self._build_command(node, cli, model, reasoning_effort, stream_input=bool(images))
         try:
             proc = subprocess.Popen(
                 command,
@@ -473,7 +516,7 @@ class CodeBuddyCliProvider:
         # stdin 由独立线程写入：长 transcript 超过管道缓冲区时，主线程继续读 stdout 不阻塞
         def _write_stdin() -> None:
             try:
-                proc.stdin.write(prompt)
+                proc.stdin.write(stdin_text)
                 proc.stdin.close()
             except Exception:  # noqa: BLE001 - 进程已退出时写失败静默
                 pass
@@ -514,7 +557,9 @@ class CodeBuddyCliProvider:
             if upstream_holder is not None:
                 upstream_holder.pop(_PROCESS_KEY, None)
 
-    def _build_command(self, node: str, cli: str, model: str, reasoning_effort: str) -> list[str]:
+    def _build_command(
+        self, node: str, cli: str, model: str, reasoning_effort: str, stream_input: bool = False,
+    ) -> list[str]:
         command = [
             node, cli,
             "--print",
@@ -526,6 +571,8 @@ class CodeBuddyCliProvider:
             "--no-session-persistence",
             "--max-turns", str(self.max_turns),
         ]
+        if stream_input:
+            command += ["--input-format", "stream-json"]
         if model:
             command += ["--model", model]
         if self.tools:
