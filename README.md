@@ -122,13 +122,12 @@ cb 已外置为 sidecar 插件，不再随桌面包内置：用 `scripts/build_c
 均为构建产物，不入库。图标由 `scripts/make_icon.py` 生成，可直接覆盖 `icons/icon.ico` 换成正式素材。
 cb 插件打包脚本 `scripts/build_cb_plugin.py` 从 `PLATEAU_CB_REPO` 读取 cb 仓库。
 
-### 6. 自动更新（当前：本机更新服务器）
+### 6. 自动更新（当前：plateau-registry 正式端点）
 
-更新源目前是**本机 HTTP 服务器**，正式发布端点后续自行部署。
-`tauri.conf.json` 里 `plugins.updater.endpoints` 指向 `http://127.0.0.1:17865/latest.json`，
-并为此开启了 `dangerousInsecureTransportProtocol`（仅放宽传输协议校验）；
-**签名校验由插件强制执行、不可关闭**，所以即使走 http，被篡改的安装包仍会被拒绝。
-`ci_cheap.py` 会拦截「insecure 开关 + 非 loopback 端点」的组合，防止联调配置被带到公网。
+更新源是 **plateau-registry**，`tauri.conf.json` 里 `plugins.updater.endpoints` 指向
+`https://maxweili.devcloud.woa.com/registry/update/latest.json`（HTTPS，未开启 insecure 传输）。
+**签名校验由插件强制执行、不可关闭**，被篡改的安装包会被拒绝。
+`ci_cheap.py` 会拦截「insecure 开关 + 非 loopback 端点」的组合，防止联调配置被带回 http 明文。
 
 #### 签名密钥
 
@@ -142,7 +141,9 @@ npx tauri signer generate -w "$env:USERPROFILE\.tauri\plateau.key" --ci
   CI 用 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 两个 Secret。
 - `cargo check` / `npx tauri dev` 不需要它；只有 `npx tauri build` 必须注入。
 
-#### 起本地更新服务器
+#### 本地联调更新服务器（可选）
+
+正式发布走下方 `release.py`，本机服务器仅用于改 `tauri.conf.json` 端点后的本地联调：
 
 ```bash
 # 版本只认 VERSION，避免 manifest 与安装包错版本
@@ -173,12 +174,19 @@ python -m http.server 17865 --bind 127.0.0.1 --directory desktop/src-tauri/targe
 | `PLATEAU_UPDATE_DISABLE=1` | 完全关闭更新检查（离线环境） |
 | `PLATEAU_UPDATE_ENDPOINT=<url>` | 运行时覆盖端点，用于切换自建服务 / beta 渠道 |
 
-#### 部署正式更新源时
+#### 发布新版本
 
-1. 把 `tauri.conf.json` 的 `endpoints` 改成 HTTPS URL，**删除** `dangerousInsecureTransportProtocol`。
-2. `python scripts/build_update_manifest.py --url https://<host>/Plateau_<版本>_x64-setup.exe --notes "..."`。
-3. 上传 `setup.exe`、`setup.exe.sig`、`latest.json` 三个文件。
-4. `python scripts/bump_version.py --notes "..."` 升版本并记录 → `python scripts/ci_cheap.py` → 重新构建。
+一键发版脚本 `scripts/release.py` 把发版流程串起来（升版本 → 守卫 → 构建 → 校验 → 上传）：
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = "$env:USERPROFILE\.tauri\plateau.key"
+$env:PLATEAU_ADMIN_TOKEN = "<registry 管理 token>"
+python scripts/release.py --notes "修复 xxx"             # 全流程：bump → ci_cheap → 构建 → 上传
+python scripts/release.py --notes "..." --skip-build     # 已有安装包，只跑守卫 + 上传
+```
+
+上传走 registry 的 `POST /api/admin/update/assets`（传 `setup.exe` + `.sig`），registry 自动生成
+`latest.json` 并把安装包暴露到 `https://maxweili.devcloud.woa.com/registry/update/<安装包>`。
 
 回滚：默认只允许 `version > 当前版本`，禁止降级。紧急回滚请**发布更高版本号、内容回退到上个 tag 的包**
 （例如 1.0.2 的内容 = 1.0.0）；单点回退可手动运行旧安装包 `/S`。

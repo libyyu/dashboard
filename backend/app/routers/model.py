@@ -22,6 +22,12 @@ from fastapi import APIRouter, Request
 from starlette.responses import JSONResponse, StreamingResponse
 
 from app.core.errors import error_response
+from app.adapters.codebuddy_cli_provider import (
+    CodeBuddyCliProvider,
+    cli_supported_models,
+    has_usable_auth,
+    save_api_key,
+)
 from app.adapters.storage_factory import get_storage
 from app.runtime import ports
 
@@ -131,6 +137,16 @@ def _model_providers() -> list[dict[str, object]]:
     for entry in _registry_providers():
         if str(entry["name"]) not in seen:
             providers.append(entry)
+    # 本地 CodeBuddy CLI（cli 插件，非 HTTP provider）：插件 + 共享 node 都就绪才暴露，避免前端选中后跑不通
+    if CodeBuddyCliProvider.available() and "codebuddy-cli" not in seen:
+        providers.append({
+            "name": "codebuddy-cli",
+            "display_name": "CodeBuddy CLI（本地）",
+            "base_url": "",
+            "source": "plugin",
+            "api_type": "cli",
+            "auth": "login",
+        })
     return providers
 
 
@@ -195,6 +211,12 @@ async def model_list(provider: str) -> dict[str, object] | JSONResponse:
     info = _find_provider(provider)
     if info is None:
         return error_response("PLUGIN_NOT_FOUND", 404, f"未知 model provider：{provider}")
+    if info.get("api_type") == "cli":
+        # 本地 CLI 无 /v1/models 面：动态解析 --help 的支持清单（带进程级缓存）
+        models = await asyncio.to_thread(cli_supported_models)
+        return {"object": "list", "data": [
+            {"id": m, "object": "model", "owned_by": "codebuddy-cli"} for m in models
+        ]}
     result = await asyncio.to_thread(
         _request_json, f"{info['base_url']}/v1/models", _MODELS_TIMEOUT,
         headers=_auth_headers(info),
@@ -209,6 +231,11 @@ async def model_detail(provider: str, model_id: str) -> dict[str, object] | JSON
     info = _find_provider(provider)
     if info is None:
         return error_response("PLUGIN_NOT_FOUND", 404, f"未知 model provider：{provider}")
+    if info.get("api_type") == "cli":
+        models = await asyncio.to_thread(cli_supported_models)
+        if model_id not in models:
+            return error_response("MODEL_NOT_FOUND", 404, f"未知模型：{model_id}")
+        return {"id": model_id, "object": "model", "owned_by": "codebuddy-cli"}
     result = await asyncio.to_thread(
         _request_json, f"{info['base_url']}/v1/models/{model_id}", _MODELS_TIMEOUT,
         headers=_auth_headers(info),
@@ -250,6 +277,9 @@ async def model_auth_status(provider: str) -> dict[str, object] | JSONResponse:
         return error_response("PLUGIN_NOT_FOUND", 404, f"未知 model provider：{provider}")
     if info.get("auth") != "login":
         return error_response("NOT_CONFIGURED", 404, f"provider {provider} 不提供 auth")
+    if info.get("api_type") == "cli":
+        # 本地 CLI：已存 API key，或全局公开 codebuddy 就位（自带登录态）即视为 ready
+        return {"status": "ready" if has_usable_auth() else "pending"}
     result = await asyncio.to_thread(
         _request_json, f"{info['base_url']}/auth/status", _AUTH_TIMEOUT,
         headers=_auth_headers(info),
@@ -260,12 +290,25 @@ async def model_auth_status(provider: str) -> dict[str, object] | JSONResponse:
 
 
 @router.post("/model/{provider}/auth/login", response_model=None)
-async def model_auth_login(provider: str) -> dict[str, object] | JSONResponse:
+async def model_auth_login(provider: str, request: Request) -> dict[str, object] | JSONResponse:
     info = _find_provider(provider)
     if info is None:
         return error_response("PLUGIN_NOT_FOUND", 404, f"未知 model provider：{provider}")
     if info.get("auth") != "login":
         return error_response("NOT_CONFIGURED", 404, f"provider {provider} 不提供 auth")
+    if info.get("api_type") == "cli":
+        # 本地 CLI：接收前端填入的 API key，落库供后续会话复用
+        api_key = ""
+        try:
+            body = json.loads((await request.body()).decode("utf-8"))
+            if isinstance(body, dict):
+                api_key = str(body.get("api_key") or "").strip()
+        except Exception:  # noqa: BLE001 - body 缺失/非 JSON 时按空处理
+            api_key = ""
+        if not api_key:
+            return error_response("INVALID_ARGUMENT", 422, "缺少 api_key")
+        save_api_key(api_key)
+        return {"started": True, "status": "ready"}
     result = await asyncio.to_thread(
         _request_json, f"{info['base_url']}/auth/login", _AUTH_TIMEOUT,
         method="POST", headers=_auth_headers(info),

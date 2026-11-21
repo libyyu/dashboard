@@ -77,7 +77,7 @@
                     v-for="m in modelsByProvider[p.name]"
                     :key="m"
                     :value="optionKey(p.name, m)"
-                    :label="m"
+                    :label="`${p.name}/${m}`"
                   />
                 </el-option-group>
                 <el-option
@@ -251,7 +251,11 @@ const needsLogin = computed(() => {
   return s !== undefined && s !== 'ready'
 })
 const modelLabel = computed(() => {
-  if (modelName.value) return modelName.value
+  if (modelName.value) {
+    // 显示带 provider 前缀（{provider}/{model}），与下拉项 / 消息 meta 一致
+    const p = currentProvider.value
+    return p ? `${p.name}/${modelName.value}` : modelName.value
+  }
   const p = currentProvider.value
   return p ? p.display_name || p.name : '默认模型'
 })

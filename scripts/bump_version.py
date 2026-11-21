@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -58,6 +59,29 @@ def append_entry(version: str, notes: str) -> None:
     )
     entry = f"## [{version}] - {date.today().isoformat()}\n\n### 变更\n\n{bullets}\n\n"
     _ = CHANGELOG.write_text(text[:match.start()] + entry + text[match.start():], encoding="utf-8")
+
+
+def _sync_registry_changelog() -> None:
+    """升版本后同步 registry 的 data/changelog.json（单一真源 = dashboard CHANGELOG.md）。
+
+    registry 默认与 dashboard 同父目录（../plateau-registry），可用 PLATEAU_REGISTRY_REPO 覆盖。
+    找不到脚本或同步失败只告警、不阻断升版本：registry 可能未检出或离线。
+    """
+    registry_repo = Path(os.environ.get("PLATEAU_REGISTRY_REPO") or ROOT.parent / "plateau-registry")
+    sync_script = registry_repo / "sync_changelog.py"
+    if not sync_script.is_file():
+        print(f"[warn] 未找到 registry 同步脚本 {sync_script}（可设 PLATEAU_REGISTRY_REPO），跳过 changelog 同步")
+        return
+    proc = subprocess.run(
+        [sys.executable, str(sync_script)],
+        cwd=str(registry_repo), capture_output=True,
+    )
+    if proc.stdout:
+        print(_decode(proc.stdout).strip())
+    if proc.returncode != 0:
+        if proc.stderr:
+            print(_decode(proc.stderr).strip())
+        print("[warn] registry changelog 同步失败，已跳过（不影响升版本）")
 
 
 def check() -> int:
@@ -137,6 +161,7 @@ def main() -> int:
 
     if notes and not has_entry(target):
         append_entry(target, notes)
+    _sync_registry_changelog()
     print(f"[OK] {current} → {target}，更新内容已记录")
     return check()
 

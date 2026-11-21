@@ -7,6 +7,70 @@
 - 自动更新弹窗的「更新说明」默认读本文件最新版本条目（`scripts/build_update_manifest.py`）。
 - 格式：`## [版本] - YYYY-MM-DD`，按「新增 / 修复 / 变更」分组。
 
+## [1.0.25] - 2026-11-21
+
+### 变更
+
+- 插件前端路由按 routes[].entry 运行时懒加载，加载失败回退占位页
+- changelog 自动同步进发版流：bump_version 升版本即同步 registry 的 changelog.json
+- 新增一键发版脚本 scripts/release.py（bump → ci_cheap → 构建 → 校验 → 上传 registry）
+- 自动更新切 https 正式端点（maxweili.devcloud.woa.com/registry），移除 insecure 联调开关
+- 修复 sync_changelog.py --dry-run 在 Windows 控制台的 GBK 编码错误
+
+## [1.0.24] - 2026-11-20
+
+### 变更
+
+- 运行时安装幂等改用入口文件 + --version 实测；环境检查面板增加登录引导
+
+## [1.0.23] - 2026-11-20
+
+### 变更
+
+- CodeBuddy CLI 动态获取模型列表（37 个）；模型显示带 provider 前缀
+
+## [1.0.22] - 2026-11-20
+
+### 变更
+
+- 插件商店 codebuddy-cli 环境自动检查
+
+## [1.0.21] - 2026-11-20
+
+### 变更
+
+- codebuddy-cli 能力以插件安装为总开关：未装插件时 provider 一律不暴露、相关服务禁用（即使全局有 node/codebuddy）
+
+## [1.0.20] - 2026-11-20
+
+### 变更
+
+- codebuddy-cli 优先使用全局公开版 codebuddy（@tencent-ai/codebuddy-code，自带 cli-external-link 登录、脱离 IDE 无感），插件内嵌 WorkBuddy 版兜底
+
+## [1.0.19] - 2026-11-20
+
+### 变更
+
+- codebuddy-cli 接入登录引导：登录态缺失映射 PROVIDER_AUTH_REQUIRED，auth 端点支持保存/复用 API key，前端 CLI 登录弹窗填 key
+
+## [1.0.18] - 2026-11-20
+
+### 变更
+
+- 插件商店支持一键更新（已装版本 < catalog latest 显示「更新至」按钮，后端更新时清理旧版本目录）
+
+## [1.0.17] - 2026-11-20
+
+### 变更
+
+- 插件安装增加实时进度条；codebuddy-cli 插件 2.0.1 补齐 product.json/builtin（修复 Agent template unavailable）；修复前端两个既有类型错误
+
+## [1.0.16] - 2026-11-20
+
+### 变更
+
+- 更新源切换到 plateau-registry：updater 端点改为 http://127.0.0.1:8700/update/latest.json，registry 兼容旧包根路径 /latest.json
+
 ## [1.0.15] - 2026-11-19
 
 ### 变更

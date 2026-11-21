@@ -15,7 +15,8 @@ import {
   type EventSourceParser,
   type ParseError,
 } from 'eventsource-parser'
-import type { AgentEvent, AgentSessionEvents, ChatSendRequest, ToolCall } from '../../types/chat'
+import type { AgentEvent, ChatSendRequest, ToolCall } from '../../types/chat'
+import type { AgentSessionEvents } from '../../api/contract'
 import { ENDPOINTS } from '../../api/contract'
 import { BASE_URL, MOCK, http, newRequestId } from '../../api/http'
 

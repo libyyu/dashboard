@@ -33,8 +33,10 @@ export const ENDPOINTS = {
   plugins: '/api/plugins',
   pluginsCapabilities: '/api/plugins/capabilities',
   pluginsInstall: '/api/plugins/install',
+  pluginsInstallProgress: '/api/plugins/install/progress',
   pluginsUninstall: '/api/plugins/uninstall',
   pluginsRegistry: '/api/plugins/registry',
+  pluginsCliEnvCheck: '/api/plugins/cli-env/check',
 } as const
 
 export type HealthLevel = 'healthy' | 'degraded' | 'standalone' | 'unavailable'
@@ -124,10 +126,22 @@ export interface PluginRoute {
   entry: string
 }
 
+export type PluginKind = 'frontend' | 'sidecar' | 'cli'
+
+export interface PluginInstallProgress {
+  active?: boolean
+  stage?: string
+  message?: string
+  current?: number
+  total?: number
+  done?: boolean
+  error?: string
+}
+
 export interface PluginInfo {
   id: string
   version: string
-  kind: 'frontend' | 'sidecar'
+  kind: PluginKind
   name?: string
   requires: string[]
   provides?: string
@@ -145,7 +159,7 @@ export interface RegistryPlugin {
   id: string
   name?: string
   description?: string
-  kind?: 'frontend' | 'sidecar'
+  kind?: PluginKind
   latest_version?: string
   requires_core?: string
   requires?: string[]
@@ -157,6 +171,26 @@ export interface RegistryCatalog {
   schema: number
   plugins: RegistryPlugin[]
   reachable?: boolean
+}
+
+export interface CliEnvCheckItem {
+  id: string
+  label: string
+  ok: boolean
+  detail: string
+}
+
+export type CliEnvAction = 'none' | 'install' | 'repair'
+
+export interface CliEnvCheck {
+  available: boolean
+  action: CliEnvAction
+  plugin_installed: boolean
+  node_ready: boolean
+  cli_ready: boolean
+  global_cli: boolean
+  auth_ready: boolean
+  checks: CliEnvCheckItem[]
 }
 
 export interface CapabilityInfo {

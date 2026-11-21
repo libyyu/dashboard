@@ -42,6 +42,8 @@ desktop/src-tauri/gen/
 *.log
 logs/
 profiles/
+# 本地 registry 数据目录（scripts/registry_server.py 的默认 --root）
+registry/
 *.tmp
 launcher.lock
 launcher.ready.json

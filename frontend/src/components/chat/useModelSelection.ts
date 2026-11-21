@@ -7,6 +7,7 @@
 
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import type { ModelProviderInfo } from '../../types/chat'
 import { http } from '../../api/http'
 import { ENDPOINTS } from '../../api/contract'
@@ -132,7 +133,7 @@ export function useModelSelection(): ModelSelection {
       }),
     )
     const map: Record<string, string[]> = {}
-    for (const [name, models] of entries) map[name] = models
+    for (const [name, models] of entries) map[name] = [...models]
     modelsByProvider.value = map
   }
 
@@ -194,12 +195,34 @@ export function useModelSelection(): ModelSelection {
     }
   })
 
-  // 登录引导：cb 为异步跳转流程，触发后刷新登录态与目录展示
+  // 登录引导：cb（sidecar）走异步浏览器跳转流程；本地 CLI 弹窗让用户粘贴 API key 落库
   async function triggerLogin(provider?: string): Promise<void> {
     if (!provider) return
+    let body: string | undefined
+    const info = providers.value.find((p) => p.name === provider)
+    if (info?.api_type === 'cli') {
+      let value = ''
+      try {
+        const result = await ElMessageBox.prompt(
+          '请输入 CodeBuddy 的 API Key（可在 CodeBuddy 账户 / 控制台获取）',
+          '登录 CodeBuddy CLI',
+          {
+            inputType: 'password',
+            confirmButtonText: '保存并登录',
+            cancelButtonText: '取消',
+          },
+        )
+        value = (result.value ?? '').trim()
+      } catch {
+        return // 用户取消
+      }
+      if (!value) return
+      body = JSON.stringify({ api_key: value })
+    }
     try {
       await http(ENDPOINTS.modelAuthLogin.replace('{provider}', encodeURIComponent(provider)), {
         method: 'POST',
+        body,
       })
     } catch {
       /* 登录失败保持现状，由错误气泡继续展示 */

@@ -8,12 +8,14 @@
   catalog.json                             # 可手工维护；缺省时按 manifest 扫描生成
   plugins/{id}/{version}/plugin.json       # manifest
   plugins/{id}/{version}/{files...}        # 包体文件
+  runtimes/{id}/{version}/runtime.json     # 运行时元数据（官方下载 URL + sha256，包体不落 registry）
 
 端点：
   GET /healthz
   GET /plugins/catalog.json
   GET /plugins/{id}/{version}/plugin.json
   GET /plugins/{id}/{version}/{file}
+  GET /runtimes/{id}/{version}/runtime.json
 
 定位：cb 是「大模型服务」（provides=model），不是「智能体」（agent）。
 智能体是后续在 model 之上、用 mcp/skill 组建的更高层，不属于 registry 的能力清单。
@@ -125,13 +127,12 @@ class RegistryHandler(BaseHTTPRequestHandler):
                 self._send_json(_scan_catalog(self.root / "plugins"))
             return
 
-        # /plugins/{id}/{version}/{...}
+        # /plugins/{id}/{version}/{...} 或 /runtimes/{id}/{version}/{...}
         parts = [p for p in path.split("/") if p]
-        if len(parts) >= 4 and parts[0] == "plugins":
-            rel = Path(*parts[1:])
-            target = (self.root / rel).resolve()
-            plugins_root = (self.root / "plugins").resolve()
-            if target != plugins_root and plugins_root not in target.parents:
+        if len(parts) >= 4 and parts[0] in ("plugins", "runtimes"):
+            target = (self.root / Path(*parts)).resolve()
+            section_root = (self.root / parts[0]).resolve()
+            if target != section_root and section_root not in target.parents:
                 self._send_text("forbidden", 403)
                 return
             if not target.is_file():

@@ -25,6 +25,7 @@ from fastapi import APIRouter, Request
 from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
 from app.adapters.cb_openai_provider import CBOpenAIProvider
+from app.adapters.codebuddy_cli_provider import CodeBuddyCliProvider
 from app.adapters.openai_compat_provider import OpenAICompatProvider
 from app.adapters.session_store import SqliteSessionStore
 from app.core.agent import AgentEvent
@@ -66,6 +67,9 @@ def _create_adapter(provider_info: dict[str, object]) -> object:
         return CBOpenAIProvider(base_url)
     if api_type == "openai-completions":
         return OpenAICompatProvider(base_url, api_key)
+    if api_type == "cli":
+        # 本地 CodeBuddy CLI：本机进程，无需 base_url/api_key；工具/工作目录留待 agent 阶段
+        return CodeBuddyCliProvider()
     # 未来协议（cli-* 等）尚未注册 adapter：按标准面兜底，让 provider 自己决定兼容
     return OpenAICompatProvider(base_url, api_key)
 
@@ -358,6 +362,13 @@ async def agent_cancel(id: str) -> dict[str, object] | JSONResponse:
         # 关闭底层响应，让阻塞中的 read 立即抛异常，不必等 cb 的下一个心跳
         try:
             upstream.close()
+        except Exception:  # noqa: BLE001
+            pass
+    process = state.upstream_holder.get("process")
+    if process is not None:
+        # CodeBuddyCliProvider 把 subprocess 句柄暴露在此，terminate 让 stdout readline 立即返回
+        try:
+            process.terminate()
         except Exception:  # noqa: BLE001
             pass
     return {"ok": True, "run_id": id, "status": "cancelling"}

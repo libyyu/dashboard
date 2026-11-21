@@ -86,7 +86,9 @@ const showActions = computed(() => {
 
 const metaText = computed(() => {
   const parts: string[] = []
-  if (props.message.model) parts.push(props.message.model)
+  const m = props.message
+  // 模型带 provider 前缀（{provider}/{model}），与输入框 / 下拉项显示一致
+  if (m.model) parts.push(m.provider ? `${m.provider}/${m.model}` : m.model)
   const total = props.message.usage?.total_tokens
   if (total) parts.push(`${fmtTok(total)} tokens`)
   const d = props.message.durationMs

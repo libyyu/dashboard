@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "1.0.15",
+  "version": "1.0.25",
   "note": "前后端契约单一真源。前后端各自独立验证：前端 VITE_API_MOCK=1 离线跑 + npm run build；后端 python scripts/ci_cheap.py 静态守卫。任一侧不得 import 对方代码。",
   "base_url": "/",
   "headers": {
@@ -286,6 +286,14 @@
       "notes": "拉 catalog → 下载 → sha256 校验 → 落盘 → 写 SQLite；控制类永不 shed"
     },
     {
+      "path": "/api/plugins/install/progress",
+      "method": "GET",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "PluginInstallProgress",
+      "notes": "安装进度查询（stage/message/current/total/done/error，安装期间前端轮询）"
+    },
+    {
       "path": "/api/plugins/uninstall",
       "method": "POST",
       "lane": "control",
@@ -300,6 +308,14 @@
       "implemented": true,
       "response": "RegistryCatalog",
       "notes": "透传 registry catalog.json（供前端可安装列表）"
+    },
+    {
+      "path": "/api/plugins/cli-env/check",
+      "method": "GET",
+      "lane": "best_effort",
+      "implemented": true,
+      "response": "CliEnvCheck",
+      "notes": "codebuddy-cli 运行环境检查（插件/node/cli/登录态逐项状态 + 修复动作），商店打开时自动调用"
     }
   ],
   "architecture": {
