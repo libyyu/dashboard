@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "1.0.33",
+  "version": "1.0.34",
   "note": "前后端契约单一真源。前后端各自独立验证：前端 VITE_API_MOCK=1 离线跑 + npm run build；后端 python scripts/ci_cheap.py 静态守卫。任一侧不得 import 对方代码。",
   "base_url": "/",
   "headers": {

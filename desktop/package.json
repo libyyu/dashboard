@@ -1,7 +1,7 @@
 {
   "name": "plateau-desktop-shell",
   "private": true,
-  "version": "1.0.33",
+  "version": "1.0.34",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

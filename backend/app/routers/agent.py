@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import threading
 import time
@@ -56,6 +57,35 @@ _AUTH_ERROR_CODES = frozenset({
     "CB_LOGIN_FAILED", "PROVIDER_AUTH_FAILED", "LOGIN_REQUIRED",
     "UNAUTHORIZED", "401",
 })
+
+# --------------------------------------------------------------------------- #
+# CLI 会话续用（省 token）：应用 session_id → 稳定 CLI session 的映射。
+# 同模型 + 同 provider + 用户消息序列未变时，用 --resume 只发增量；否则全量重发。
+# 绑定只驻内存：应用重启后自动回到全量（一次），不跨进程假设 CLI 转写仍存在。
+# --------------------------------------------------------------------------- #
+_cli_bindings: dict[str, dict[str, str]] = {}
+_cli_bindings_lock = threading.Lock()
+
+
+def _cli_fingerprint(users: list[dict[str, object]]) -> str:
+    """用户消息序列指纹：历史被编辑/删除时指纹变，触发放弃 resume。"""
+    payload = [{"content": m.get("content")} for m in users]
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _get_cli_binding(session_id: str) -> dict[str, str] | None:
+    with _cli_bindings_lock:
+        return _cli_bindings.get(session_id)
+
+
+def _set_cli_binding(session_id: str, binding: dict[str, str] | None) -> None:
+    with _cli_bindings_lock:
+        if binding is None:
+            _cli_bindings.pop(session_id, None)
+        else:
+            _cli_bindings[session_id] = binding
 
 
 def _create_adapter(provider_info: dict[str, object]) -> object:
@@ -202,6 +232,9 @@ def _execute_run(
     forward_messages: list[dict[str, object]],
     reasoning_effort: str,
     provider_name: str,
+    resume: bool = False,
+    cli_session_id: str = "",
+    commit_binding: dict[str, str] | None = None,
 ) -> None:
     """后台执行 run：消费 provider 事件 → 持久化 → 收尾落库 assistant 消息。
 
@@ -216,11 +249,17 @@ def _execute_run(
         type="run_started", payload={"model": model, "provider": provider_name},
     ))
     try:
-        for raw in adapter.iter_events(  # type: ignore[attr-defined]
+        events = adapter.iter_events(  # type: ignore[attr-defined]
             model, forward_messages,
             cancel_event=state.cancel_event, upstream_holder=state.upstream_holder,
             reasoning_effort=reasoning_effort,
-        ):
+            resume=resume, session_id=cli_session_id,
+        ) if isinstance(adapter, CodeBuddyCliProvider) else adapter.iter_events(  # type: ignore[attr-defined]
+            model, forward_messages,
+            cancel_event=state.cancel_event, upstream_holder=state.upstream_holder,
+            reasoning_effort=reasoning_effort,
+        )
+        for raw in events:
             if raw.type == "message_delta":
                 content_parts.append(_as_text(raw.payload))
             elif raw.type == "thinking_delta":
@@ -250,6 +289,9 @@ def _execute_run(
         else:
             state.status = "completed"
     finally:
+        if state.status == "completed" and commit_binding is not None:
+            # 本轮成功后固化绑定：下次同条件走 resume 增量续传
+            _set_cli_binding(state.session_id, commit_binding)
         _unregister(state.run_id)
         if content_parts or thinking_parts or calls:
             store.append_message(state.session_id, {
@@ -299,6 +341,7 @@ async def agent_run_stream(request: Request) -> StreamingResponse | JSONResponse
     _register(state)
 
     adapter = _create_adapter(provider_info)
+    resolved_provider = str(provider_info["name"])
     store.ensure_session(session_id, title=title or _derive_title(messages))
     # 持久化本轮用户消息（含附件元信息；assistant 回复在流结束后按增量拼接再落库），
     # 使会话可整体回放，不依赖前端内存态。
@@ -306,21 +349,50 @@ async def agent_run_stream(request: Request) -> StreamingResponse | JSONResponse
     if user_message is not None:
         store.append_message(session_id, user_message)
     # 透传前剥离 attachments 字段（模型协议不感知，仅用于本地回放）
-    forward_messages = _strip_attachments(messages)
-    # 系统提示词：作为首条 system 消息透传给上游（不持久化，仅影响本次推理）
-    if system:
-        forward_messages = [{"role": "system", "content": system}, *forward_messages]
-    # 上下文窗口：超长会话按 token 估算截断，避免撑爆 provider 上下文
-    forward_messages = trim_messages(forward_messages)
+    stripped = _strip_attachments(messages)
+    users = [m for m in stripped if isinstance(m, dict) and m.get("role") == "user"]
+
+    # CLI 会话续用：同模型 + 同 provider + 用户消息序列未变 → --resume 只发增量。
+    # 其余情况全量重发（含首次 / 切模型 / 切 provider / 历史被编辑）。
+    resume = False
+    cli_session_id = ""
+    commit_binding: dict[str, str] | None = None
+    if isinstance(adapter, CodeBuddyCliProvider):
+        binding = _get_cli_binding(session_id)
+        if binding and binding["model"] == model and binding["provider"] == resolved_provider \
+                and _cli_fingerprint(users[:-1]) == binding["fingerprint"]:
+            resume = True
+            cli_session_id = binding["cli_session_id"]
+        if resume:
+            # 增量：只发本轮新消息（含图片）；历史由 CLI --resume 自建
+            forward_messages = users[-1:]
+        else:
+            forward_messages = stripped
+            if system:
+                forward_messages = [{"role": "system", "content": system}, *forward_messages]
+            forward_messages = trim_messages(forward_messages)
+            cli_session_id = _new_id()
+            commit_binding = {
+                "cli_session_id": cli_session_id,
+                "model": model,
+                "provider": resolved_provider,
+                "fingerprint": _cli_fingerprint(users),
+            }
+    else:
+        # 非 CLI provider：维持全量透传
+        forward_messages = stripped
+        if system:
+            forward_messages = [{"role": "system", "content": system}, *forward_messages]
+        forward_messages = trim_messages(forward_messages)
 
     # 本次 run 的事件基线（run 启动前的最后 seq），tail 只推送本次 run 的新事件
     baseline_seq = store.last_seq(session_id)
 
     # run 在后台线程执行：事件按 seq 落库，与 SSE 连接解耦（断点续传的前提）
-    resolved_provider = str(provider_info["name"])
     run_thread = threading.Thread(
         target=_execute_run,
-        args=(store, state, adapter, model, forward_messages, reasoning_effort, resolved_provider),
+        args=(store, state, adapter, model, forward_messages, reasoning_effort, resolved_provider,
+              resume, cli_session_id, commit_binding),
         daemon=True,
     )
     run_thread.start()

@@ -461,6 +461,8 @@ class CodeBuddyCliProvider:
         upstream_holder: dict[str, object] | None = None,
         timeout: float = _STREAM_TIMEOUT,
         reasoning_effort: str = "",
+        resume: bool = False,
+        session_id: str = "",
     ) -> Iterator[AgentEvent]:
         resolved = _resolve_cli()
         if resolved:
@@ -490,7 +492,10 @@ class CodeBuddyCliProvider:
         else:
             stdin_text = prompt
 
-        command = self._build_command(node, cli, model, reasoning_effort, stream_input=bool(images))
+        command = self._build_command(
+            node, cli, model, reasoning_effort,
+            stream_input=bool(images), resume=resume, session_id=session_id,
+        )
         try:
             proc = subprocess.Popen(
                 command,
@@ -558,7 +563,8 @@ class CodeBuddyCliProvider:
                 upstream_holder.pop(_PROCESS_KEY, None)
 
     def _build_command(
-        self, node: str, cli: str, model: str, reasoning_effort: str, stream_input: bool = False,
+        self, node: str, cli: str, model: str, reasoning_effort: str,
+        stream_input: bool = False, resume: bool = False, session_id: str = "",
     ) -> list[str]:
         command = [
             node, cli,
@@ -567,10 +573,15 @@ class CodeBuddyCliProvider:
             "--verbose",
             "--permission-mode", "dontAsk",
             "--strict-mcp-config", "--mcp-config", "{}",
-            "--session-id", uuid.uuid4().hex,
-            "--no-session-persistence",
             "--max-turns", str(self.max_turns),
         ]
+        # 会话续用：resume 用稳定 id 续接；否则用稳定 id 新建并落盘（供后续 resume）。
+        # 只有 resume 时 CLI 自建历史，故不再传 --no-session-persistence。
+        sid = session_id or uuid.uuid4().hex
+        if resume:
+            command += ["--resume", sid]
+        else:
+            command += ["--session-id", sid]
         if stream_input:
             command += ["--input-format", "stream-json"]
         if model:
