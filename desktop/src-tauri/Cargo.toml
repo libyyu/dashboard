@@ -1,6 +1,6 @@
 [package]
 name = "plateau-desktop"
-version = "1.0.25"
+version = "1.0.32"
 description = "Plateau Dashboard 桌面壳"
 edition = "2021"
 
@@ -14,9 +14,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
-tauri-plugin-updater = "2"
+# updater 用 native-tls（Windows = Schannel，信任系统证书库）。注意：办公网 iOA 对
+# 未签名进程访问 80/443/8080 等 Web 端口回明文 403（code 190001），表现为 TLS 错误
+# 0x80090308 / InvalidContentType——与 TLS 栈无关，更新源因此走 devcloud 直连端口 :8700。
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls"] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
-reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["blocking", "native-tls"], default-features = false }

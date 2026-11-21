@@ -48,6 +48,35 @@ fn log_line(dir: &Path, msg: &str) {
     }
 }
 
+/// 展开完整错误源链。顶层 reqwest 错误往往只有一句 "error sending request"，
+/// 根因（DNS 解析失败 / TCP 超时 / TLS 拒绝）在 source 链里，写进日志才能定位。
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut chain = vec![e.to_string()];
+    let mut cur = e.source();
+    while let Some(src) = cur {
+        chain.push(src.to_string());
+        cur = src.source();
+    }
+    chain.join(" <- ")
+}
+
+/// 办公网 iOA 对未签名进程访问 80/443/8080 等 Web 端口回明文 403（code 190001）：https 下
+/// 读到非 TLS 数据报 0x80090308（SEC_E_INVALID_TOKEN）/ InvalidContentType，http 下是
+/// 非 2xx → ReleaseNotFound。命中这些特征时给出可操作的提示，而不是让用户猜。
+fn interception_hint(detail: &str) -> &'static str {
+    let tls_garbage = detail.contains("-2146893048")
+        || detail.contains("0x80090308")
+        || detail.contains("InvalidContentType")
+        || detail.contains("corrupt message");
+    let no_release = detail.contains("Could not fetch a valid release JSON");
+    if tls_garbage || no_release {
+        "\n疑似被 iOA 软件联网管控拦截（未签名程序访问 80/443 等 Web 端口受限）。\
+         可在 iOA → 安全 → 软件访问详情 → 添加文件夹，放行 Plateau 安装目录后重试。"
+    } else {
+        ""
+    }
+}
+
 fn disabled() -> bool {
     matches!(
         std::env::var("PLATEAU_UPDATE_DISABLE").as_deref(),
@@ -169,7 +198,7 @@ async fn check(app: AppHandle, force: bool) -> Result<(), String> {
         )
         .await
         .map_err(|e| {
-            log_line(&dir, &format!("下载/签名校验失败：{e}"));
+            log_line(&dir, &format!("下载/签名校验失败：{}", error_chain(&e)));
             format!("下载或签名校验失败：{e}")
         })?;
     log_line(&dir, &format!("下载完成 {} bytes（累计 {}），签名校验通过", bytes.len(), downloaded));
@@ -210,5 +239,8 @@ async fn check_remote(
     updater
         .check()
         .await
-        .map_err(|e| format!("检查更新请求失败：{e}"))
+        .map_err(|e| {
+            let detail = error_chain(&e);
+            format!("检查更新请求失败：{detail}{}", interception_hint(&detail))
+        })
 }

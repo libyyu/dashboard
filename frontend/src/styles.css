@@ -1,40 +1,40 @@
 :root {
   color-scheme: light;
 
-  /* —— 表面与中性（暖纸底，非纯白 / 非纯灰） —— */
-  --pd-paper: oklch(97.2% 0.007 82);
-  --pd-paper-2: oklch(93.5% 0.011 82);
-  --pd-surface: oklch(99.2% 0.004 82);
-  --pd-surface-2: oklch(96% 0.008 82);
+  /* —— 表面与中性（冷灰近白，非暖纸） —— */
+  --pd-paper: oklch(97.8% 0.003 262);
+  --pd-paper-2: oklch(95% 0.005 262);
+  --pd-surface: oklch(100% 0 0);
+  --pd-surface-2: oklch(96.5% 0.004 262);
 
-  /* —— 墨色（深色带轻微冷偏） —— */
-  --pd-text: oklch(23.5% 0.022 262);
-  --pd-text-2: oklch(42% 0.02 262);
-  --pd-muted: oklch(52% 0.02 262);
-  --pd-faint: oklch(63% 0.015 262);
-  --pd-border: oklch(88% 0.01 82);
-  --pd-border-strong: oklch(79% 0.012 82);
+  /* —— 墨色（冷灰） —— */
+  --pd-text: oklch(24% 0.015 262);
+  --pd-text-2: oklch(43% 0.012 262);
+  --pd-muted: oklch(53% 0.01 262);
+  --pd-faint: oklch(64% 0.008 262);
+  --pd-border: oklch(90% 0.004 262);
+  --pd-border-strong: oklch(82% 0.006 262);
 
-  /* —— 强调：测量朱红（rare, powerful） —— */
-  --pd-primary: oklch(55% 0.18 30);
-  --pd-primary-strong: oklch(42% 0.15 30);
-  --pd-primary-soft: oklch(93% 0.045 30);
-  --pd-primary-ring: oklch(55% 0.18 30 / 0.16);
+  /* —— 强调：靛蓝（克制、低饱和红色只留危险态） —— */
+  --pd-primary: oklch(55% 0.19 272);
+  --pd-primary-strong: oklch(46% 0.18 272);
+  --pd-primary-soft: oklch(94.5% 0.028 272);
+  --pd-primary-ring: oklch(55% 0.19 272 / 0.15);
 
-  /* —— 地形青（装饰 / 次要信息） —— */
-  --pd-terrain: oklch(52% 0.09 190);
-  --pd-terrain-soft: oklch(91% 0.032 190);
+  /* —— 次要信息（石板灰蓝，仅装饰 / 分组标题） —— */
+  --pd-terrain: oklch(52% 0.035 255);
+  --pd-terrain-soft: oklch(94% 0.012 255);
 
-  --pd-danger: oklch(52% 0.17 28);
-  --pd-success: oklch(52% 0.11 155);
-  --pd-warning: oklch(62% 0.14 70);
+  --pd-danger: oklch(55% 0.19 25);
+  --pd-success: oklch(56% 0.12 155);
+  --pd-warning: oklch(66% 0.13 75);
 
-  /* —— 侧边栏（浅色暖纸，与内容区同源） —— */
-  --pd-sidebar: oklch(97.2% 0.007 82);
-  --pd-sidebar-2: oklch(93.5% 0.011 82);
-  --pd-sidebar-active: oklch(93% 0.045 30);
-  --pd-sidebar-text: oklch(42% 0.02 262);
-  --pd-sidebar-heading: oklch(52% 0.02 262);
+  /* —— 侧边栏（近白，比内容区微暗一档） —— */
+  --pd-sidebar: oklch(98.4% 0.003 262);
+  --pd-sidebar-2: oklch(95% 0.005 262);
+  --pd-sidebar-active: oklch(94% 0.03 272);
+  --pd-sidebar-text: oklch(43% 0.012 262);
+  --pd-sidebar-heading: oklch(53% 0.01 262);
 
   --pd-bg: var(--pd-paper);
 
@@ -50,20 +50,20 @@
 
   --pd-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
-  --pd-font: "Outfit", system-ui, -apple-system, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC",
+  --pd-font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "HarmonyOS Sans SC",
     "Microsoft YaHei", sans-serif;
-  --pd-font-display: "Fraunces", Georgia, "Times New Roman", "Songti SC", serif;
-  --pd-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  --pd-font-display: var(--pd-font);
+  --pd-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "JetBrains Mono", monospace;
 }
 
 /* —— Element Plus 主题变量覆盖（全局生效） —— */
 :root {
   --el-color-primary: var(--pd-primary);
-  --el-color-primary-light-3: oklch(68% 0.14 30);
-  --el-color-primary-light-5: oklch(78% 0.09 30);
-  --el-color-primary-light-7: oklch(88% 0.05 30);
-  --el-color-primary-light-8: oklch(92% 0.035 30);
-  --el-color-primary-light-9: oklch(95% 0.02 30);
+  --el-color-primary-light-3: oklch(68% 0.14 272);
+  --el-color-primary-light-5: oklch(78% 0.09 272);
+  --el-color-primary-light-7: oklch(88% 0.05 272);
+  --el-color-primary-light-8: oklch(92% 0.035 272);
+  --el-color-primary-light-9: oklch(95% 0.02 272);
   --el-color-primary-dark-2: var(--pd-primary-strong);
 
   --el-color-success: var(--pd-success);
@@ -121,12 +121,12 @@ a:hover { text-decoration: underline; }
 /* 细滚动条 */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
-  background: oklch(79% 0.012 82);
+  background: oklch(81% 0.006 262);
   border: 3px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover { background-color: oklch(70% 0.012 82); }
+::-webkit-scrollbar-thumb:hover { background-color: oklch(72% 0.008 262); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* —— 通用组件 —— */
@@ -188,41 +188,41 @@ a:hover { text-decoration: underline; }
 /* —— 深色主题 —— */
 [data-theme="dark"] {
   color-scheme: dark;
-  --pd-paper: oklch(16% 0.013 262);
-  --pd-paper-2: oklch(19% 0.013 262);
-  --pd-surface: oklch(21.5% 0.013 262);
-  --pd-surface-2: oklch(18% 0.012 262);
-  --pd-text: oklch(93% 0.007 82);
-  --pd-text-2: oklch(73% 0.012 262);
-  --pd-muted: oklch(63% 0.013 262);
-  --pd-faint: oklch(52% 0.013 262);
-  --pd-border: oklch(28% 0.013 262);
-  --pd-border-strong: oklch(35% 0.013 262);
-  --pd-primary: oklch(66% 0.16 30);
-  --pd-primary-strong: oklch(74% 0.15 30);
-  --pd-primary-soft: oklch(29% 0.055 30);
-  --pd-primary-ring: oklch(66% 0.16 30 / 0.22);
-  --pd-terrain: oklch(66% 0.085 190);
-  --pd-terrain-soft: oklch(25% 0.032 190);
-  --pd-danger: oklch(64% 0.15 28);
-  --pd-success: oklch(64% 0.11 155);
-  --pd-warning: oklch(70% 0.13 70);
-  --pd-sidebar: oklch(16% 0.013 262);
-  --pd-sidebar-2: oklch(19% 0.013 262);
-  --pd-sidebar-active: oklch(29% 0.055 30);
-  --pd-sidebar-text: oklch(73% 0.012 262);
-  --pd-sidebar-heading: oklch(56% 0.013 262);
+  --pd-paper: oklch(17% 0.01 262);
+  --pd-paper-2: oklch(20% 0.01 262);
+  --pd-surface: oklch(21.5% 0.01 262);
+  --pd-surface-2: oklch(18.5% 0.009 262);
+  --pd-text: oklch(94% 0.005 262);
+  --pd-text-2: oklch(74% 0.01 262);
+  --pd-muted: oklch(64% 0.01 262);
+  --pd-faint: oklch(53% 0.01 262);
+  --pd-border: oklch(28% 0.01 262);
+  --pd-border-strong: oklch(35% 0.012 262);
+  --pd-primary: oklch(68% 0.15 272);
+  --pd-primary-strong: oklch(76% 0.14 272);
+  --pd-primary-soft: oklch(29% 0.06 272);
+  --pd-primary-ring: oklch(68% 0.15 272 / 0.22);
+  --pd-terrain: oklch(64% 0.03 255);
+  --pd-terrain-soft: oklch(25% 0.02 255);
+  --pd-danger: oklch(66% 0.16 25);
+  --pd-success: oklch(66% 0.11 155);
+  --pd-warning: oklch(72% 0.12 75);
+  --pd-sidebar: oklch(17% 0.01 262);
+  --pd-sidebar-2: oklch(20% 0.01 262);
+  --pd-sidebar-active: oklch(29% 0.06 272);
+  --pd-sidebar-text: oklch(74% 0.01 262);
+  --pd-sidebar-heading: oklch(56% 0.01 262);
   --pd-shadow-sm: 0 1px 2px oklch(8% 0.01 262 / 0.5), 0 12px 32px oklch(8% 0.01 262 / 0.45);
   --pd-shadow-md: 0 12px 32px oklch(8% 0.01 262 / 0.5);
   --pd-shadow-lg: 0 24px 56px -20px oklch(8% 0.01 262 / 0.6);
 
   --el-color-primary: var(--pd-primary);
-  --el-color-primary-light-3: oklch(62% 0.14 30);
-  --el-color-primary-light-5: oklch(52% 0.11 30);
-  --el-color-primary-light-7: oklch(42% 0.08 30);
-  --el-color-primary-light-8: oklch(36% 0.06 30);
-  --el-color-primary-light-9: oklch(30% 0.05 30);
-  --el-color-primary-dark-2: oklch(74% 0.15 30);
+  --el-color-primary-light-3: oklch(62% 0.13 272);
+  --el-color-primary-light-5: oklch(52% 0.11 272);
+  --el-color-primary-light-7: oklch(42% 0.08 272);
+  --el-color-primary-light-8: oklch(36% 0.06 272);
+  --el-color-primary-light-9: oklch(30% 0.05 272);
+  --el-color-primary-dark-2: oklch(76% 0.14 272);
   --el-text-color-primary: var(--pd-text);
   --el-text-color-regular: var(--pd-text-2);
   --el-text-color-secondary: var(--pd-muted);

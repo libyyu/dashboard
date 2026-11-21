@@ -12,12 +12,16 @@
   TAURI_SIGNING_PRIVATE_KEY   签名私钥路径（npx tauri build 需要，否则产不出 .sig）
   PLATEAU_ADMIN_TOKEN         registry 管理 token（上传需要，否则管理端点 401）
   PLATEAU_REGISTRY_URL        registry 地址（默认 https://maxweili.devcloud.woa.com/registry）
+  KEYSTORE_AUTH_ID / KEYSTORE_AUTH_SECRET / KEYSTORE_BIN
+                              Keystore Authenticode 签名（见 scripts/keystore_sign.py）；
+                              可选；配齐则签名，缺失则出未签名包
 
 流程：
   1. bump_version.py --notes   升版本 + CHANGELOG + 同步 registry changelog.json
   2. ci_cheap.py               零依赖守卫（契约 / 解耦 / 更新通道不变量），失败即停
-  3. 构建：frontend build → packaging/build.py all --assemble → npx tauri build
-  4. 校验构建产物齐备（setup.exe + .sig）
+  3. 构建：frontend build → packaging/build.py all --assemble → 签 launcher/dashboard.exe
+     → npx tauri build（signCommand 签主程序 / 卸载器 / 安装包）
+  4. 校验构建产物齐备（setup.exe + .sig + Authenticode Valid）
   5. 上传 setup.exe + .sig → registry /api/admin/update/assets（自动生成 latest.json）
 """
 from __future__ import annotations
@@ -25,11 +29,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
 from pathlib import Path
 from urllib.request import Request, urlopen
+
+import keystore_sign  # 同目录脚本（python scripts/release.py 时 scripts/ 在 sys.path 上）
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -77,16 +84,47 @@ def guard() -> None:
     _run([sys.executable, str(ROOT / "scripts" / "ci_cheap.py")], ROOT)
 
 
-def build() -> None:
+def _sign_override_config() -> Path:
+    """生成 tauri --config 覆盖文件：让打包器用 keystore_sign.py 签主程序 / NSIS 插件 / 卸载器 / 安装包。
+
+    不写进 tauri.conf.json：本机 dev 构建没有 Keystore 凭据，也不该被签名步骤卡住。
+    """
+    override = {
+        "bundle": {"windows": {"signCommand": {
+            "cmd": sys.executable,
+            "args": [str(ROOT / "scripts" / "keystore_sign.py"), "%1"],
+        }}}
+    }
+    path = ROOT / "build" / "tauri.sign.override.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(override, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _resource_exes() -> list[Path]:
+    """随包分发的 PyInstaller 产物（tauri 只签主程序，不签 resources）。"""
+    base = DESKTOP / "src-tauri" / "binaries"
+    return sorted(p for sub in ("launcher", "dashboard") for p in (base / sub).glob("*.exe"))
+
+
+def build(signed: bool) -> None:
     if not os.environ.get("TAURI_SIGNING_PRIVATE_KEY"):
         raise SystemExit("[release] 未设置 TAURI_SIGNING_PRIVATE_KEY（npx tauri build 需要签名私钥）")
     _run(["npm", "run", "build"], FRONTEND, shell=True)
     _run([sys.executable, str(ROOT / "packaging" / "build.py"), "all", "--assemble"], ROOT)
     _run([sys.executable, str(ROOT / "packaging" / "build.py"), "verify"], ROOT)
-    _run(["npx", "tauri", "build"], DESKTOP, shell=True)
+    tauri_cmd = ["npx", "tauri", "build"]
+    if signed:
+        exes = _resource_exes()
+        if not exes:
+            raise SystemExit("[release] binaries/ 下没有找到 launcher/dashboard 可执行文件")
+        print(f"\n[release] 签名随包可执行文件：{[p.name for p in exes]}", flush=True)
+        keystore_sign.sign(exes)
+        tauri_cmd += ["--config", str(_sign_override_config())]
+    _run(tauri_cmd, DESKTOP, shell=True)
 
 
-def verify_artifacts(version: str) -> None:
+def verify_artifacts(version: str, signed: bool) -> None:
     """校验构建产物齐备（setup.exe + .sig）。不校验本地 latest.json：正式发布由 registry 自动生成。"""
     setup = setup_path(version)
     sig = Path(str(setup) + ".sig")
@@ -94,6 +132,10 @@ def verify_artifacts(version: str) -> None:
         if not path.is_file() or path.stat().st_size == 0:
             raise SystemExit(f"[release] 缺少{label}：{path}")
         print(f"[release] {label}齐备：{path.name}（{path.stat().st_size} B）")
+    status = keystore_sign.signature_status(setup)
+    print(f"[release] 安装包 Authenticode：{status}")
+    if signed and status != "Valid":
+        raise SystemExit("[release] 安装包未通过 Authenticode 校验，拒绝发布")
 
 
 def _multipart(fields: dict[str, str], files: dict[str, tuple[str, bytes]]) -> tuple[str, bytes]:
@@ -133,12 +175,11 @@ def upload(version: str) -> None:
     changelog = ROOT / "CHANGELOG.md"
     if changelog.is_file():
         text = changelog.read_text(encoding="utf-8")
-        marker = f"## [{version}]"
-        if marker in text:
-            body = text.split(marker, 1)[1]
+        match = re.search(rf"(?ms)^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text)
+        if match:
             notes = "；".join(
                 line.strip().lstrip("-").strip()
-                for line in body.splitlines()
+                for line in match.group(1).splitlines()
                 if line.strip() and not line.strip().startswith("###")
             )
 
@@ -175,14 +216,19 @@ def main() -> int:
     _ = parser.add_argument("--skip-upload", action="store_true", help="只升版本 + 构建，不上传 registry")
     args = parser.parse_args()
 
+    # Authenticode 签名可选：配了 Keystore 凭据就签，没配就出未签名包（iOA 需手动放行）
+    missing = keystore_sign.missing_prereqs()
+    signed = not missing
+    print(f"[release] Authenticode 签名：{'启用' if signed else '跳过（' + ', '.join(missing) + '）'}")
+
     if not args.skip_bump:
         if not args.notes:
             raise SystemExit("[release] 未指定 --skip-bump 时必须给 --notes")
         bump(args.notes)
     guard()
     if not args.skip_build:
-        build()
-    verify_artifacts(read_version())
+        build(signed)
+    verify_artifacts(read_version(), signed)
     if not args.skip_upload:
         upload(read_version())
     print("\n[release] 全部完成")

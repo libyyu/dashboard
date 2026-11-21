@@ -261,8 +261,11 @@ def main() -> int:
     check("日志被 gitignore", "*.log" in gitignore and "logs/" in gitignore)
     check("更新产物被 gitignore", "latest.json" in gitignore and "*.sig" in gitignore)
 
-    # 更新通道不变量：公钥必须是真值；http 端点只允许 loopback，
-    # 防止 dangerousInsecureTransportProtocol 被带到公网部署。
+    # 更新通道不变量：公钥必须是真值；端点为 https，或 http 直连 devcloud 非 Web 端口。
+    # 实测（同一未签名进程对照）：iOA 只对 80/443/8080 等 Web 端口做「无发行商软件」
+    # 联网拦截（回明文 403 code 190001，https 下表现为 TLS 0x80090308），非 Web 端口
+    # （如 Atlas 的 :8686、registry 直连 :8700）放行。所以未签名包必须走直连端口；
+    # 明文仅损失机密性，安装包完整性由 updater 强制的 Ed25519 签名兜底。
     tauri_cfg = json.loads((ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
     resources = [str(r) for r in tauri_cfg.get("bundle", {}).get("resources", [])]
     check("tauri resources 不含 cb（已外置）", "cb" not in " ".join(resources).lower(), str(resources))
@@ -271,14 +274,24 @@ def main() -> int:
     endpoints = [str(u) for u in updater_cfg.get("endpoints", [])]
     insecure = bool(updater_cfg.get("dangerousInsecureTransportProtocol"))
     loopback = {"127.0.0.1", "localhost", "::1"}
+    ioa_web_ports = {80, 443, 8080, 8443}
+
+    def _http_allowed(u: str) -> bool:
+        p = urlparse(u)
+        host = (p.hostname or "").lower()
+        if host in loopback:
+            return True
+        return host.endswith(".devcloud.woa.com") and p.port is not None and p.port not in ioa_web_ports
+
     check("updater 公钥已配置", len(pubkey) >= 80 and "PLACEHOLDER" not in pubkey.upper())
     check("updater 生成签名产物", tauri_cfg.get("bundle", {}).get("createUpdaterArtifacts") is True)
     check("updater 端点非空", bool(endpoints))
-    check("insecure 开关仅限本机联调",
-          not insecure or all(
-              urlparse(u).scheme == "http" and (urlparse(u).hostname or "") in loopback
-              for u in endpoints
-          ), str(endpoints))
+    check("insecure 开关仅限本机 / devcloud 直连端口",
+          not insecure or all(urlparse(u).scheme == "http" and _http_allowed(u) for u in endpoints),
+          str(endpoints))
+    check("更新端点 https 或 devcloud 直连端口",
+          all(urlparse(u).scheme == "https" or _http_allowed(u) for u in endpoints),
+          str(endpoints))
     check("NSIS 更新为 passive 模式", updater_cfg.get("windows", {}).get("installMode") == "passive")
 
     updater_src = (ROOT / "desktop" / "src-tauri" / "src" / "updater.rs").read_text(encoding="utf-8")
